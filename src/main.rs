@@ -1,16 +1,49 @@
+mod input;
+
 use anyhow::{Context, Result};
-use crossterm::event::{poll, read, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
 };
-use crossterm::ExecutableCommand;
+
 use std::io;
-use std::time::Duration;
-use tui::backend::CrosstermBackend;
-use tui::widgets::{Block, Borders};
-use tui::Terminal;
+
+use tui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    terminal::Frame,
+    widgets::{Block, Borders, List, ListItem},
+    Terminal,
+};
+
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
+
+type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
 fn main() -> Result<()> {
+    let mut term = start()?;
+    term.hide_cursor()?;
+
+    let input = input::get_input();
+
+    term.clear()?;
+    loop {
+        term.draw(draw).context("Error in rendering loop")?;
+        match input.try_recv() {
+            Ok(key) => match key.code {
+                KeyCode::Char(c) if c == 'q' => break,
+                KeyCode::Esc => break,
+                _ => {}
+            },
+            Err(_) => {}
+        }
+    }
+    end(term)
+}
+
+fn start() -> Result<Term> {
     let mut stdout = io::stdout();
     stdout
         .execute(EnterAlternateScreen)?
@@ -18,32 +51,41 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
 
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("Failed on TUI initialization")?;
-    terminal.hide_cursor()?;
-    terminal.clear()?;
-    loop {
-        terminal
-            .draw(|f| {
-                let size = f.size();
-                let block = Block::default().title("Block").borders(Borders::ALL);
-                f.render_widget(block, size);
-            })
-            .context("Error in rendering loop")?;
-        if poll(Duration::from_millis(500))? {
-            if let Event::Key(event) = read()? {
-                match event.code {
-                    KeyCode::Char(c) if c == 'q' => break,
-                    KeyCode::Esc => break,
-                    _ => {}
-                }
-            }
-        }
-    }
-    terminal.show_cursor()?;
+    Ok(Terminal::new(backend).context("Failed on TUI initialization")?)
+}
+
+fn end(mut term: Term) -> Result<()> {
+    term.show_cursor()?;
     disable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout
         .execute(LeaveAlternateScreen)?
         .execute(DisableMouseCapture)?;
     Ok(())
+}
+
+fn draw(f: &mut Frame<'_, CrosstermBackend<io::Stdout>>) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .margin(1)
+        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+        .split(f.size());
+
+    let rng = thread_rng();
+
+    let items: Vec<String> = (0..=10)
+        .into_iter()
+        .map(|_| rng.sample_iter(&Alphanumeric).take(20).collect::<String>())
+        .collect();
+
+    let items: Vec<ListItem> = items.iter().map(|s| ListItem::new(s.as_str())).collect();
+
+    let list = List::new(items)
+        .block(Block::default().title("Stuff").borders(Borders::ALL))
+        .highlight_symbol(">>");
+    f.render_widget(list, chunks[0]);
+    let block = Block::default()
+        .title("Box with other stuff")
+        .borders(Borders::ALL);
+    f.render_widget(block, chunks[1]);
 }
