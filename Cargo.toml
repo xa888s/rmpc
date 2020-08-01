@@ -12,3 +12,4 @@ tui = { version = "0.10.0", default-features = false, features = ['crossterm'] }
 crossterm = "0.17.7"
 anyhow = "1.0.32"
 rand = "0.7.3"
+log = "0.4.11"

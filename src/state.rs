@@ -1,40 +1,46 @@
-use std::ops::{Deref, DerefMut};
-use tui::widgets::ListState;
+use mpd::Song;
+use std::ops::Deref;
+use tui::{
+    text::Span,
+    widgets::{List, ListItem, ListState},
+};
 
-pub struct StatefulList<T> {
-    items: Vec<T>,
+#[derive(Debug)]
+pub struct StatefulList<'a, T, A>
+where
+    T: Deref<Target = [A]> + 'a,
+{
+    items: T,
+    list: Vec<ListItem<'a>>,
     state: ListState,
 }
 
-impl<T: Deref<Target = str>> StatefulList<T> {
-    pub fn new_with(items: Vec<T>) -> StatefulList<T> {
-        let mut state = ListState::default();
-
-        // set first in list as selected
-        if items.len() > 0 {
-            state.select(Some(0));
-        }
-        StatefulList { items, state }
+impl<'a, T, A> StatefulList<'a, T, A>
+where
+    T: Deref<Target = [A]> + 'a,
+{
+    // Unselect the currently selected item if any. The implementation of `ListState` makes
+    // sure that the stored offset is also reset.
+    pub fn unselect(&mut self) {
+        self.state.select(None);
     }
 
-    pub fn push(&mut self, item: T) {
-        let old = self.state.selected();
-        self.items.push(item);
-        if self.items.len() > 0 {
-            self.state.select(old);
-        }
+    pub fn list(&self) -> List<'a> {
+        List::new(self.list.clone())
     }
 
-    pub fn pop(&mut self) {
-        let old = self.state.selected();
-        self.items.pop();
-        if self.items.len() > 0 {
-            self.state.select(old);
-        }
+    pub fn state(&mut self) -> &mut ListState {
+        &mut self.state
+    }
+}
+
+impl<'a> StatefulList<'a, Vec<Song>, Song> {
+    pub fn selected(&self) -> Option<&Song> {
+        self.state.selected().map(|i| &self.items[i])
     }
 
-    pub fn selected(&self) -> Option<&str> {
-        self.state.selected().map(|i| &*self.items[i])
+    pub fn selected_index(&self) -> Option<usize> {
+        self.state.selected()
     }
 
     // Select the next item. This will not be reflected until the widget is drawn in the
@@ -69,27 +75,40 @@ impl<T: Deref<Target = str>> StatefulList<T> {
         self.state.select(Some(i));
     }
 
-    // Unselect the currently selected item if any. The implementation of `ListState` makes
-    // sure that the stored offset is also reset.
-    pub fn unselect(&mut self) {
-        self.state.select(None);
+    pub fn new_with_songs(items: Vec<Song>) -> StatefulList<'a, Vec<Song>, Song> {
+        let mut events = StatefulList {
+            items,
+            state: ListState::default(),
+            list: Vec::new(),
+        };
+        if !events.items.is_empty() {
+            events.state.select(Some(0));
+        }
+        // events are fresh and not changed after this
+        unsafe { events.update() };
+        events
     }
 
-    pub fn as_parts(&mut self) -> (&Vec<T>, &mut ListState) {
-        (&self.items, &mut self.state)
+    pub fn set(&mut self, items: Vec<Song>) {
+        self.items = items;
+        unsafe { self.update() };
     }
-}
 
-impl<T> Deref for StatefulList<T> {
-    type Target = Vec<T>;
+    unsafe fn update(&mut self) {
+        self.list
+            .resize_with(self.items.len(), || ListItem::new(""));
 
-    fn deref(&self) -> &Self::Target {
-        &self.items
-    }
-}
+        assert_eq!(self.items.len(), self.list.len());
 
-impl<T> DerefMut for StatefulList<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.items
+        // make sure there is enough space for
+        for (song, list_item) in self.items.iter().zip(self.list.iter_mut()) {
+            let title = song.title.as_deref().unwrap();
+
+            // safe as long as items memory is not modified
+            *list_item = ListItem::new(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                title.as_ptr(),
+                title.len(),
+            )));
+        }
     }
 }

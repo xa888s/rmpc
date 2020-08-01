@@ -1,7 +1,9 @@
 mod input;
+mod play;
 mod state;
 
 use anyhow::{Context, Result};
+use mpd::Song;
 use state::StatefulList;
 
 use crossterm::{
@@ -15,7 +17,9 @@ use std::io;
 use tui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    style::{Color, Style},
+    text::Span,
+    widgets::{Block, Borders},
     Terminal,
 };
 
@@ -26,24 +30,48 @@ fn main() -> Result<()> {
     term.hide_cursor()?;
 
     let input = input::get_input();
+    let (tx, rx) = play::start_client("127.0.0.1:6600")?;
 
     term.clear()?;
 
-    let mut events = StatefulList::new_with(vec!["Bruh".to_string(), "Whip".to_string()]);
+    tx.send(play::Message::Start)?;
+    let play::Response::Songs(songs) = rx.recv().unwrap();
+    //let first_songs = if let play::Response::Songs(s) = rx.recv().unwrap() {
+    //    s
+    //} else {
+    //    Vec::new()
+    //};
+
+    let mut events = StatefulList::new_with_songs(songs);
     loop {
-        let (items, state) = events.as_parts();
-        draw(&mut term, items, state)?;
+        draw(&mut term, &mut events)?;
         match input.try_recv() {
             Ok(key) => match key.code {
                 KeyCode::Char(c) => match c {
                     'q' => break,
                     'j' => events.next(),
                     'k' => events.previous(),
+                    'd' => match events.selected_index() {
+                        Some(i) => {
+                            tx.send(play::Message::Delete(i))?;
+                            let play::Response::Songs(songs) = rx.recv()?;
+                            events.set(songs);
+                        }
+                        None => {}
+                    },
+                    'p' => {
+                        tx.send(play::Message::TogglePause)?;
+                    }
                     _ => {}
                 },
-                KeyCode::Enter => {
-                    events.push("Dab".to_string());
-                }
+                KeyCode::Enter => match events.selected() {
+                    Some(s) => {
+                        tx.send(play::Message::Play(s.clone()))?;
+                        let play::Response::Songs(songs) = rx.recv()?;
+                        events.set(songs);
+                    }
+                    None => {}
+                },
                 KeyCode::Esc => break,
                 _ => {}
             },
@@ -74,7 +102,7 @@ fn end(mut term: Term) -> Result<()> {
     Ok(())
 }
 
-fn draw(term: &mut Term, items: &[String], state: &mut ListState) -> Result<()> {
+fn draw<'a>(term: &mut Term, events: &mut StatefulList<'a, Vec<Song>, Song>) -> Result<()> {
     term.draw(|f| {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -82,19 +110,19 @@ fn draw(term: &mut Term, items: &[String], state: &mut ListState) -> Result<()> 
             .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
             .split(f.size());
 
-        let items: Vec<ListItem> = items
-            .iter()
-            .map(|item| ListItem::new(item.as_str()))
-            .collect();
+        let list = events
+            .list()
+            .block(
+                Block::default()
+                    .title([Span::styled(" Songs ", Style::default().fg(Color::White))].to_vec())
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Magenta)),
+            )
+            .highlight_style(Style::default().fg(Color::Magenta))
+            .highlight_symbol(">> ");
+        f.render_stateful_widget(list, chunks[0], events.state());
 
-        let list = List::new(items)
-            .block(Block::default().title("Stuff").borders(Borders::ALL))
-            .highlight_symbol(">>");
-        f.render_stateful_widget(list, chunks[0], state);
-
-        let block = Block::default()
-            .title("Box with other stuff")
-            .borders(Borders::ALL);
+        let block = Block::default().title(" Song ").borders(Borders::ALL);
         f.render_widget(block, chunks[1]);
     })
     .context("Error in rendering loop")
