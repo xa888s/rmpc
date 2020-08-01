@@ -12,16 +12,18 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use std::io;
+use std::{io, thread, time::Duration};
 
 use tui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::Span,
-    widgets::{Block, Borders},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Terminal,
 };
+
+const TICK_RATE: u64 = 17;
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -35,7 +37,11 @@ fn main() -> Result<()> {
     term.clear()?;
 
     tx.send(play::Message::Start)?;
-    let play::Response::Songs(songs) = rx.recv().unwrap();
+    let songs = if let play::Response::Songs(s) = rx.recv().unwrap() {
+        s
+    } else {
+        Vec::new()
+    };
     //let first_songs = if let play::Response::Songs(s) = rx.recv().unwrap() {
     //    s
     //} else {
@@ -44,6 +50,7 @@ fn main() -> Result<()> {
 
     let mut events = StatefulList::new_with_songs(songs);
     loop {
+        thread::sleep(Duration::from_millis(TICK_RATE));
         draw(&mut term, &mut events)?;
         match input.try_recv() {
             Ok(key) => match key.code {
@@ -54,8 +61,9 @@ fn main() -> Result<()> {
                     'd' => match events.selected_index() {
                         Some(i) => {
                             tx.send(play::Message::Delete(i))?;
-                            let play::Response::Songs(songs) = rx.recv()?;
-                            events.set(songs);
+                            if let play::Response::Songs(songs) = rx.recv()? {
+                                events.set(songs);
+                            }
                         }
                         None => {}
                     },
@@ -67,8 +75,10 @@ fn main() -> Result<()> {
                 KeyCode::Enter => match events.selected() {
                     Some(s) => {
                         tx.send(play::Message::Play(s.clone()))?;
-                        let play::Response::Songs(songs) = rx.recv()?;
-                        events.set(songs);
+                        if let play::Response::Songs(songs) = rx.recv()? {
+                            events.set(songs);
+                            events.select(0);
+                        }
                     }
                     None => {}
                 },
@@ -102,7 +112,7 @@ fn end(mut term: Term) -> Result<()> {
     Ok(())
 }
 
-fn draw<'a>(term: &mut Term, events: &mut StatefulList<'a, Vec<Song>, Song>) -> Result<()> {
+fn draw(term: &mut Term, events: &mut StatefulList<Vec<Song>, Song>) -> Result<()> {
     term.draw(|f| {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -116,14 +126,24 @@ fn draw<'a>(term: &mut Term, events: &mut StatefulList<'a, Vec<Song>, Song>) -> 
                 Block::default()
                     .title([Span::styled(" Songs ", Style::default().fg(Color::White))].to_vec())
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Magenta)),
+                    .border_style(Style::default().fg(Color::Magenta))
+                    .border_type(BorderType::Rounded),
             )
             .highlight_style(Style::default().fg(Color::Magenta))
             .highlight_symbol(">> ");
         f.render_stateful_widget(list, chunks[0], events.state());
 
-        let block = Block::default().title(" Song ").borders(Borders::ALL);
-        f.render_widget(block, chunks[1]);
+        match events.selected_index() {
+            Some(i) => {
+                let tags = events.get_tags();
+                let paragraph = Paragraph::new(&*tags[i])
+                    .block(Block::default().title(" Song ").borders(Borders::ALL))
+                    .wrap(Wrap { trim: true })
+                    .alignment(Alignment::Center);
+                f.render_widget(paragraph, chunks[1]);
+            }
+            None => {}
+        }
     })
     .context("Error in rendering loop")
 }

@@ -5,12 +5,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-const TICK_RATE: u64 = 17;
-
 pub fn get_input() -> Receiver<KeyEvent> {
     let (tx, rx) = mpsc::channel();
 
-    let rate = Duration::from_millis(TICK_RATE);
+    let rate = Duration::from_millis(crate::TICK_RATE);
     thread::spawn(move || {
         let mut last_tick = Instant::now();
         loop {

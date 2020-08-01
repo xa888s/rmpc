@@ -5,6 +5,7 @@ use std::{
     sync::mpsc,
     sync::mpsc::{Receiver, Sender},
     thread,
+    time::Duration,
 };
 
 pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Receiver<Response>)> {
@@ -14,13 +15,19 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
     let (tx, response_rx) = mpsc::channel();
 
     thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(crate::TICK_RATE));
         match rx.recv() {
             Ok(m) => {
                 let mut update = true;
                 match m {
                     Message::Play(s) => {
+                        let songs = conn.queue().unwrap();
                         conn.pause(true).unwrap();
+                        for song in songs.iter().filter(|song| **song == s) {
+                            conn.delete(song.place.unwrap().pos).unwrap();
+                        }
                         conn.insert(s, 0).unwrap();
+                        conn.switch(0).unwrap();
                         conn.pause(false).unwrap();
                     }
                     Message::Start => update = true,
@@ -32,7 +39,7 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
                     }
                     Message::TogglePause => {
                         conn.toggle_pause().unwrap();
-                        update = true;
+                        update = false;
                     }
                 }
                 if update {
@@ -61,4 +68,5 @@ pub enum Message {
 #[non_exhaustive]
 pub enum Response {
     Songs(Vec<Song>),
+    Phantom,
 }

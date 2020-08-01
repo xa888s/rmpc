@@ -6,18 +6,18 @@ use tui::{
 };
 
 #[derive(Debug)]
-pub struct StatefulList<'a, T, A>
+pub struct StatefulList<T, A>
 where
-    T: Deref<Target = [A]> + 'a,
+    T: Deref<Target = [A]>,
 {
     items: T,
-    list: Vec<ListItem<'a>>,
+    tag_strs: Vec<String>,
     state: ListState,
 }
 
-impl<'a, T, A> StatefulList<'a, T, A>
+impl<T, A> StatefulList<T, A>
 where
-    T: Deref<Target = [A]> + 'a,
+    T: Deref<Target = [A]>,
 {
     // Unselect the currently selected item if any. The implementation of `ListState` makes
     // sure that the stored offset is also reset.
@@ -25,22 +25,35 @@ where
         self.state.select(None);
     }
 
-    pub fn list(&self) -> List<'a> {
-        List::new(self.list.clone())
-    }
-
     pub fn state(&mut self) -> &mut ListState {
         &mut self.state
     }
 }
 
-impl<'a> StatefulList<'a, Vec<Song>, Song> {
+impl StatefulList<Vec<Song>, Song> {
+    pub fn list<'a>(&self) -> List<'a> {
+        List::new(
+            self.items
+                .iter()
+                .map(|s| ListItem::new(Span::raw(s.title.clone().unwrap())))
+                .collect::<Vec<ListItem<'a>>>(),
+        )
+    }
+
     pub fn selected(&self) -> Option<&Song> {
         self.state.selected().map(|i| &self.items[i])
     }
 
     pub fn selected_index(&self) -> Option<usize> {
         self.state.selected()
+    }
+
+    pub fn select(&mut self, index: usize) {
+        self.state.select(Some(if index == 0 {
+            index
+        } else {
+            self.items.len() % index
+        }));
     }
 
     // Select the next item. This will not be reflected until the widget is drawn in the
@@ -75,40 +88,52 @@ impl<'a> StatefulList<'a, Vec<Song>, Song> {
         self.state.select(Some(i));
     }
 
-    pub fn new_with_songs(items: Vec<Song>) -> StatefulList<'a, Vec<Song>, Song> {
+    pub fn new_with_songs(items: Vec<Song>) -> StatefulList<Vec<Song>, Song> {
         let mut events = StatefulList {
             items,
             state: ListState::default(),
-            list: Vec::new(),
+            tag_strs: Vec::new(),
         };
         if !events.items.is_empty() {
             events.state.select(Some(0));
         }
         // events are fresh and not changed after this
-        unsafe { events.update() };
+        events.tag_strs = events
+            .items
+            .iter()
+            .map(|s| {
+                let mut buf = String::new();
+                s.tags.iter().for_each(|(t, s)| {
+                    buf.push_str(&*t);
+                    buf.push_str(": ");
+                    buf.push_str(&*s);
+                    buf.push_str("\n");
+                });
+                buf
+            })
+            .collect();
         events
     }
 
     pub fn set(&mut self, items: Vec<Song>) {
         self.items = items;
-        unsafe { self.update() };
+        self.tag_strs = self
+            .items
+            .iter()
+            .map(|s| {
+                let mut buf = String::new();
+                s.tags.iter().for_each(|(t, s)| {
+                    buf.push_str(&*t);
+                    buf.push_str(": ");
+                    buf.push_str(&*s);
+                    buf.push_str("\n");
+                });
+                buf
+            })
+            .collect();
     }
 
-    unsafe fn update(&mut self) {
-        self.list
-            .resize_with(self.items.len(), || ListItem::new(""));
-
-        assert_eq!(self.items.len(), self.list.len());
-
-        // make sure there is enough space for
-        for (song, list_item) in self.items.iter().zip(self.list.iter_mut()) {
-            let title = song.title.as_deref().unwrap();
-
-            // safe as long as items memory is not modified
-            *list_item = ListItem::new(std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                title.as_ptr(),
-                title.len(),
-            )));
-        }
+    pub fn get_tags(&self) -> &[String] {
+        &self.tag_strs
     }
 }
