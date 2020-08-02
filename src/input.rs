@@ -4,13 +4,18 @@ use crossterm::{
     event::{KeyCode, KeyEvent},
 };
 use std::{
-    sync::{mpsc, mpsc::Receiver, mpsc::Sender},
+    sync::{
+        mpsc,
+        mpsc::{Receiver, Sender},
+    },
     thread,
     time::{Duration, Instant},
 };
 
-use crate::play;
-use crate::state::StatefulList;
+use crate::{
+    play::{Message, Songs},
+    state::StatefulList,
+};
 use mpd::Song;
 
 pub fn get() -> Receiver<KeyEvent> {
@@ -34,9 +39,8 @@ pub fn get() -> Receiver<KeyEvent> {
 }
 
 pub fn use_key(
-    tx: &Sender<play::Message>,
-    rx: &Receiver<play::Response>,
-    events: &mut StatefulList<Vec<Song>, Song>,
+    tx: &Sender<Message>,
+    events: &mut StatefulList<Songs, Song>,
     code: KeyCode,
 ) -> bool {
     let mut should_break = false;
@@ -49,26 +53,19 @@ pub fn use_key(
             'G' => events.select_last(),
             'd' => {
                 if let Some(i) = events.selected_index() {
-                    tx.send(play::Message::Delete(i)).unwrap();
-                    if let play::Response::Songs(songs) = rx.recv().unwrap() {
-                        events.set_songs(songs);
-                    }
+                    tx.send(Message::Delete(i)).unwrap();
                 }
             }
-            // TODO: fix toggle pause not working
             'p' => {
-                tx.send(play::Message::TogglePause).unwrap();
+                tx.send(Message::TogglePause).unwrap();
             }
             _ => {}
         },
-        // TODO: fix block and subsequent panic due to invalid message format
         KeyCode::Enter => {
             if let Some(s) = events.selected() {
-                tx.send(play::Message::Play(s.clone())).unwrap();
-                if let play::Response::Songs(songs) = rx.recv().unwrap() {
-                    events.set_songs(songs);
-                    events.select(0);
-                }
+                let song = s.clone();
+                tx.send(Message::Play(song)).unwrap();
+                events.select(0);
             }
         }
         KeyCode::Esc => should_break = true,

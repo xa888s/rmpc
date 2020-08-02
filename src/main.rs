@@ -5,6 +5,7 @@ mod state;
 
 use anyhow::{Context, Result};
 use mpd::Song;
+use play::{Message, Songs};
 use state::StatefulList;
 
 use crossterm::{
@@ -16,7 +17,7 @@ use crossterm::{
 use log::Level;
 use simple_logger;
 
-use std::{io, thread, time::Duration};
+use std::{io, sync::mpsc::TryRecvError, thread, time::Duration};
 
 use tui::{backend::CrosstermBackend, Terminal};
 
@@ -35,24 +36,10 @@ fn main() -> Result<()> {
 
     term.clear()?;
 
-    tx.send(play::Message::Refresh)?;
-    let songs = if let play::Response::Songs(s) = rx.recv().unwrap() {
-        s
-    } else {
-        Vec::new()
-    };
+    tx.send(Message::Refresh)?;
+    let songs: Songs = rx.try_recv().unwrap_or_default();
 
     let mut events = StatefulList::new_with_songs(songs);
-
-    if let play::Response::Song {
-        current_song,
-        status,
-    } = rx.recv().unwrap()
-    {
-        if let Some(song) = current_song {
-            events.set_current_song(song, status);
-        }
-    }
 
     loop {
         thread::sleep(Duration::from_millis(TICK_RATE));
@@ -60,39 +47,19 @@ fn main() -> Result<()> {
 
         // handling key events
         if let Ok(k) = input.try_recv() {
-            if input::use_key(&tx, &rx, &mut events, k.code) {
+            if input::use_key(&tx, &mut events, k.code) {
                 break;
             }
         }
 
         // handling update events
-        match (rx.try_recv(), rx.try_recv()) {
-            (Ok(songs), Ok(song)) => {
-                if let play::Response::Songs(songs) = songs {
-                    events.set_songs(songs);
-                }
-
-                if let play::Response::Song {
-                    current_song,
-                    status,
-                } = song
-                {
-                    match current_song {
-                        Some(song) => events.set_current_song(song, status),
-                        None => {}
-                    }
+        match rx.try_recv() {
+            Ok(songs) => events.set_items(songs),
+            Err(e) => {
+                if let TryRecvError::Disconnected = e {
+                    panic!("MPD Thread shut down before end of term")
                 }
             }
-            // seems to be triggering this one often...
-            (Ok(_), Err(_)) => {
-                end(term)?;
-                panic!("Bad last message format");
-            }
-            (Err(_), Ok(_)) => {
-                end(term)?;
-                panic!("Bad first message format");
-            }
-            (Err(_), Err(_)) => {}
         }
     }
     end(term)
@@ -119,13 +86,19 @@ fn end(mut term: Term) -> Result<()> {
     Ok(())
 }
 
-fn draw(term: &mut Term, events: &mut StatefulList<Vec<Song>, Song>) -> Result<()> {
+fn draw(term: &mut Term, events: &mut StatefulList<Songs, Song>) -> Result<()> {
     term.draw(|f| {
         let (chunks, sub_chunks) = draw::chunks(events, f);
+        let list_chunk = match (chunks.len(), sub_chunks.len()) {
+            (2, 2) => {
+                draw::tags(events, f, chunks[1]);
+                draw::gauge(events, f, sub_chunks[1]);
+                sub_chunks[0]
+            }
+            (_, _) => chunks[0],
+        };
 
-        draw::tags(events, f, chunks[1]);
-        draw::list(events, f, sub_chunks[0]);
-        draw::gauge(events, f, sub_chunks[1]);
+        draw::list(events, f, list_chunk);
     })
     .context("Error in rendering loop")
 }

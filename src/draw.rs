@@ -1,4 +1,4 @@
-use crate::state::StatefulList;
+use crate::{play::Songs, state::StatefulList};
 use mpd::Song;
 use std::io;
 use tui::{
@@ -11,7 +11,7 @@ use tui::{
 };
 
 pub fn list<'a>(
-    events: &mut StatefulList<Vec<Song>, Song>,
+    events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
@@ -30,36 +30,33 @@ pub fn list<'a>(
 }
 
 pub fn gauge<'a>(
-    events: &mut StatefulList<Vec<Song>, Song>,
+    events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
-    match events.current_song() {
-        Some((song, status)) => {
-            let elapsed = status.elapsed.unwrap().num_seconds() as f64;
-            let duration = status.duration.unwrap().num_seconds() as f64;
-            let percent = (if elapsed == 0. { 1. } else { elapsed } / duration) * 100.;
-            let gauge = Gauge::default()
-                .block(
-                    Block::default()
-                        .title(song.title.as_deref().unwrap())
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded),
-                )
-                .percent(percent as u16);
-            f.render_widget(gauge, chunk);
-        }
-        None => {}
+    if let Some((song, status)) = events.song() {
+        let elapsed = status.elapsed.unwrap().num_seconds() as f64;
+        let duration = status.duration.unwrap().num_seconds() as f64;
+        let percent = (if elapsed == 0. { 1. } else { elapsed } / duration) * 100.;
+        let gauge = Gauge::default()
+            .block(
+                Block::default()
+                    .title(song.title.as_deref().unwrap())
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .percent(percent as u16);
+        f.render_widget(gauge, chunk);
     }
 }
 
 pub fn tags<'a>(
-    events: &mut StatefulList<Vec<Song>, Song>,
+    events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
     if let Some(i) = events.selected_index() {
-        if let Some(tag_list) = events.get_tags().get(i) {
+        if let Some(tag_list) = events.tags().get(i) {
             let paragraph = Paragraph::new(&**tag_list)
                 .block(Block::default().title(" Song ").borders(Borders::ALL))
                 .wrap(Wrap { trim: true })
@@ -70,7 +67,7 @@ pub fn tags<'a>(
 }
 
 pub fn chunks<'a>(
-    events: &mut StatefulList<Vec<Song>, Song>,
+    events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
 ) -> (Vec<Rect>, Vec<Rect>) {
     let constraints = if events.is_empty() {
@@ -84,10 +81,10 @@ pub fn chunks<'a>(
         .constraints(constraints)
         .split(f.size());
 
-    if !events.is_current_song_empty() {
-        [Constraint::Percentage(90), Constraint::Percentage(10)].as_ref()
-    } else {
+    let constraints = if events.is_song_empty() {
         [Constraint::Percentage(100)].as_ref()
+    } else {
+        [Constraint::Percentage(90), Constraint::Percentage(10)].as_ref()
     };
 
     let sub_chunks = Layout::default()
