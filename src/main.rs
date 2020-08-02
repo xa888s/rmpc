@@ -36,7 +36,7 @@ fn main() -> Result<()> {
 
     term.clear()?;
 
-    tx.send(play::Message::Start)?;
+    tx.send(play::Message::Refresh)?;
     let songs = if let play::Response::Songs(s) = rx.recv().unwrap() {
         s
     } else {
@@ -58,6 +58,8 @@ fn main() -> Result<()> {
                     'q' => break,
                     'j' => events.next(),
                     'k' => events.previous(),
+                    'g' => events.select(0),
+                    'G' => events.select_last(),
                     'd' => match events.selected_index() {
                         Some(i) => {
                             tx.send(play::Message::Delete(i))?;
@@ -85,6 +87,14 @@ fn main() -> Result<()> {
                 KeyCode::Esc => break,
                 _ => {}
             },
+            Err(_) => {}
+        }
+        match rx.try_recv() {
+            Ok(s) => {
+                if let play::Response::Songs(songs) = s {
+                    events.set(songs)
+                }
+            }
             Err(_) => {}
         }
     }
@@ -134,14 +144,16 @@ fn draw(term: &mut Term, events: &mut StatefulList<Vec<Song>, Song>) -> Result<(
         f.render_stateful_widget(list, chunks[0], events.state());
 
         match events.selected_index() {
-            Some(i) => {
-                let tags = events.get_tags();
-                let paragraph = Paragraph::new(&*tags[i])
-                    .block(Block::default().title(" Song ").borders(Borders::ALL))
-                    .wrap(Wrap { trim: true })
-                    .alignment(Alignment::Center);
-                f.render_widget(paragraph, chunks[1]);
-            }
+            Some(i) => match events.get_tags().get(i) {
+                Some(tag_list) => {
+                    let paragraph = Paragraph::new(&**tag_list)
+                        .block(Block::default().title(" Song ").borders(Borders::ALL))
+                        .wrap(Wrap { trim: true })
+                        .alignment(Alignment::Center);
+                    f.render_widget(paragraph, chunks[1]);
+                }
+                None => {}
+            },
             None => {}
         }
     })

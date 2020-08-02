@@ -19,12 +19,6 @@ impl<T, A> StatefulList<T, A>
 where
     T: Deref<Target = [A]>,
 {
-    // Unselect the currently selected item if any. The implementation of `ListState` makes
-    // sure that the stored offset is also reset.
-    pub fn unselect(&mut self) {
-        self.state.select(None);
-    }
-
     pub fn state(&mut self) -> &mut ListState {
         &mut self.state
     }
@@ -54,6 +48,10 @@ impl StatefulList<Vec<Song>, Song> {
         } else {
             self.items.len() % index
         }));
+    }
+
+    pub fn select_last(&mut self) {
+        self.state.select(Some(self.items.len() - 1));
     }
 
     // Select the next item. This will not be reflected until the widget is drawn in the
@@ -116,6 +114,14 @@ impl StatefulList<Vec<Song>, Song> {
     }
 
     pub fn set(&mut self, items: Vec<Song>) {
+        let old_i = self.state.selected();
+        self.state.select(if items.len() == 0 {
+            None
+        } else if items.len() > self.items.len() {
+            old_i
+        } else {
+            Some(0)
+        });
         self.items = items;
         self.tag_strs = self
             .items
