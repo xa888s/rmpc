@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use mpd::{idle::Idle, Client, Song};
+use mpd::{idle::Idle, Client, Song, Status, Subsystem};
 use std::{
     net::ToSocketAddrs,
     sync::mpsc,
@@ -18,18 +18,20 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
         match rx.try_recv() {
             Ok(m) => match m {
                 Message::Play(s) => play(&mut conn, s).unwrap(),
-                Message::Refresh => send_updated_songs(&mut conn, &tx),
-                Message::Delete(i) => {
-                    conn.delete(i as u32).unwrap();
-                }
+                Message::Delete(i) => conn.delete(i as u32).unwrap(),
                 Message::TogglePause => conn.toggle_pause().unwrap(),
+
+                Message::Refresh => update(&mut conn, &tx),
             },
             Err(e) => match e {
                 TryRecvError::Empty => {
                     let guard = conn.idle(&[]).unwrap();
-                    match guard.get() {
-                        Ok(_) => send_updated_songs(&mut conn, &tx),
-                        Err(_) => {}
+                    if let Ok(messages) = guard.get() {
+                        for m in messages {
+                            if let Subsystem::Queue = m {
+                                update(&mut conn, &tx);
+                            }
+                        }
                     }
                 }
                 TryRecvError::Disconnected => break,
@@ -38,6 +40,21 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
         thread::sleep(Duration::from_millis(crate::TICK_RATE));
     });
     Ok((message_tx, response_rx))
+}
+
+fn update(conn: &mut Client, tx: &Sender<Response>) {
+    send_updated_songs(conn, tx);
+    send_current_song(conn, tx);
+}
+
+fn send_current_song(conn: &mut Client, tx: &Sender<Response>) {
+    let current_song = conn.currentsong().unwrap();
+    let status = conn.status().unwrap();
+    tx.send(Response::Song {
+        current_song,
+        status,
+    })
+    .unwrap();
 }
 
 fn send_updated_songs(conn: &mut Client, tx: &Sender<Response>) {
@@ -67,5 +84,9 @@ pub enum Message {
 #[non_exhaustive]
 pub enum Response {
     Songs(Vec<Song>),
+    Song {
+        current_song: Option<Song>,
+        status: Status,
+    },
     Phantom,
 }
