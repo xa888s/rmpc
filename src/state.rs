@@ -48,9 +48,7 @@ impl StatefulList<Songs, Song> {
 
     pub fn new_with_songs(songs: Songs) -> StatefulList<Songs, Song> {
         let mut state = ListState::default();
-        if !songs.is_empty() {
-            state.select(Some(0));
-        }
+        state.select(Some(0));
 
         StatefulList {
             items: songs,
