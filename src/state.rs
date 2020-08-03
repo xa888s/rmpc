@@ -1,9 +1,14 @@
 use crate::play::Songs;
 use mpd::Song;
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::{
+    ops::{Deref, DerefMut, Index, IndexMut},
+    slice::Iter,
+    vec::IntoIter,
+};
 use tui::{
+    style::{Color, Style},
     text::Span,
-    widgets::{List, ListItem, ListState},
+    widgets::{List, ListItem, ListState, Row, Table},
 };
 
 #[derive(Debug)]
@@ -41,9 +46,25 @@ impl StatefulList<Songs, Song> {
         List::new(
             self.items
                 .iter()
-                .map(|s| ListItem::new(Span::raw(s.title.clone().unwrap())))
+                .map(|s| ListItem::new(Span::raw(s.title.clone().unwrap_or("Default".to_string()))))
                 .collect::<Vec<ListItem<'a>>>(),
         )
+    }
+
+    pub fn tags(&self) -> Option<String> {
+        self.state.selected().map(|i| {
+            self.items[i]
+                .tags
+                .iter()
+                .take(self.items[i].tags.len() - 1)
+                .fold(String::new(), |mut tags, (t, s)| {
+                    tags.push_str(&*t);
+                    tags.push_str(": ");
+                    tags.push_str(&*s);
+                    tags.push_str("\n");
+                    tags
+                })
+        })
     }
 
     pub fn new_with_songs(songs: Songs) -> StatefulList<Songs, Song> {

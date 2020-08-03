@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::Result;
+
 use crate::{
     play::{Message, Songs},
     state::StatefulList,
@@ -25,9 +27,15 @@ pub fn get() -> Receiver<KeyEvent> {
     thread::spawn(move || {
         let mut last_tick = Instant::now();
         loop {
-            if event::poll(rate - last_tick.elapsed()).unwrap() {
-                if let Event::Key(k) = event::read().unwrap() {
-                    tx.send(k).unwrap();
+            if let Ok(s) = event::poll(rate - last_tick.elapsed()) {
+                if s {
+                    if let Ok(event) = event::read() {
+                        if let Event::Key(k) = event {
+                            if let Err(_) = tx.send(k) {
+                                log::warn!("Failed to send key event")
+                            }
+                        }
+                    }
                 }
             }
             if last_tick.elapsed() >= rate {
@@ -42,7 +50,7 @@ pub fn use_key(
     tx: &Sender<Message>,
     events: &mut StatefulList<Songs, Song>,
     code: KeyCode,
-) -> bool {
+) -> Result<bool> {
     let mut should_break = false;
     match code {
         KeyCode::Char(c) => match c {
@@ -53,23 +61,23 @@ pub fn use_key(
             'G' => events.select_last(),
             'd' => {
                 if let Some(i) = events.selected_index() {
-                    tx.send(Message::Delete(i)).unwrap();
+                    tx.send(Message::Delete(i))?;
                 }
             }
             'p' => {
-                tx.send(Message::TogglePause).unwrap();
+                tx.send(Message::TogglePause)?;
             }
             _ => {}
         },
         KeyCode::Enter => {
             if let Some(s) = events.selected() {
                 let song = s.clone();
-                tx.send(Message::Play(song)).unwrap();
+                tx.send(Message::Play(song))?;
                 events.select(0);
             }
         }
         KeyCode::Esc => should_break = true,
         _ => {}
     }
-    should_break
+    Ok(should_break)
 }

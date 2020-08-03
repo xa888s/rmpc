@@ -47,8 +47,12 @@ fn main() -> Result<()> {
 
         // handling key events
         if let Ok(k) = input.try_recv() {
-            if input::use_key(&tx, &mut events, k.code) {
-                break;
+            if let Ok(b) = input::use_key(&tx, &mut events, k.code) {
+                if b {
+                    break;
+                }
+            } else {
+                log::error!("Failed to use user input");
             }
         }
 

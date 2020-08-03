@@ -35,16 +35,22 @@ pub fn gauge<'a>(
     chunk: Rect,
 ) {
     if let Some((song, status)) = events.song() {
-        let elapsed = status.elapsed.unwrap().num_seconds() as f64;
-        let duration = status.duration.unwrap().num_seconds() as f64;
-        let percent = (if elapsed == 0. { 1. } else { elapsed } / duration) * 100.;
+        let (elapsed, duration) = match (status.elapsed, status.duration) {
+            (Some(e), Some(d)) => (e.num_seconds() as f64, d.num_seconds() as f64),
+            // should never really go here evaluate to false
+            _ => (0., 1.),
+        };
+
+        let mut title = song.title.unwrap_or("No title".to_string()) + " ";
+        title.insert_str(0, " ");
+        let percent = (elapsed / duration) * 100.;
         let gauge = Gauge::default()
             .block(
                 Block::default()
-                    .title(song.title.as_deref().unwrap())
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
+            .gauge_style(Style::default().fg(Color::Magenta))
             .percent(percent as u16);
         f.render_widget(gauge, chunk);
     }
@@ -55,14 +61,17 @@ pub fn tags<'a>(
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
-    if let Some(i) = events.selected_index() {
-        if let Some(tag_list) = events.tags().get(i) {
-            let paragraph = Paragraph::new(&**tag_list)
-                .block(Block::default().title(" Song ").borders(Borders::ALL))
-                .wrap(Wrap { trim: true })
-                .alignment(Alignment::Center);
-            f.render_widget(paragraph, chunk);
-        }
+    if let Some(tags) = events.tags() {
+        let tags = Paragraph::new(&*tags)
+            .block(
+                Block::default()
+                    .title(" Tags ")
+                    .border_type(BorderType::Rounded)
+                    .borders(Borders::ALL),
+            )
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
+        f.render_widget(tags, chunk);
     }
 }
 
@@ -84,7 +93,7 @@ pub fn chunks<'a>(
     let constraints = if events.is_song_empty() {
         [Constraint::Percentage(100)].as_ref()
     } else {
-        [Constraint::Percentage(90), Constraint::Percentage(10)].as_ref()
+        [Constraint::Min(3), Constraint::Max(3)].as_ref()
     };
 
     let sub_chunks = Layout::default()

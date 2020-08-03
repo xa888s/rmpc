@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use mpd::{idle::Idle, Client, Song, Status, Subsystem};
+use mpd::{Client, Song, Status};
 use std::{
     net::ToSocketAddrs,
     ops::{Deref, DerefMut, Index, IndexMut},
@@ -36,11 +36,21 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
             match rx.try_recv() {
                 Ok(m) => match m {
                     Message::Play(s) => {
-                        play(&mut conn, &s).unwrap();
+                        if let Err(_) = play(&mut conn, &s) {
+                            log::warn!("Failed to play song");
+                        }
                         cached_song = Some(s);
                     }
-                    Message::Delete(i) => conn.delete(i as u32).unwrap(),
-                    Message::TogglePause => conn.toggle_pause().unwrap(),
+                    Message::Delete(i) => {
+                        if let Err(_) = conn.delete(i as u32) {
+                            log::warn!("Failed to delete song from queue");
+                        }
+                    }
+                    Message::TogglePause => {
+                        if let Err(_) = conn.toggle_pause() {
+                            log::warn!("Failed to pause song");
+                        }
+                    }
 
                     Message::Refresh => {
                         if let Err(_) = update(&mut conn, &tx, None, None) {
@@ -69,12 +79,22 @@ fn update(
     songs: Option<Vec<Song>>,
     song: Option<Song>,
 ) -> Result<()> {
-    let song = Some((
-        song.unwrap_or_else(|| conn.currentsong().unwrap().unwrap()),
-        conn.status()?,
-    ));
+    let song = match (song, conn.status()) {
+        (Some(s), Ok(status)) => Some((s, status)),
+        (None, Ok(status)) => match conn.currentsong() {
+            Ok(Some(s)) => Some((s, status)),
+            _ => None,
+        },
+        _ => None,
+    };
 
-    let songs = songs.unwrap_or_else(|| conn.queue().unwrap());
+    let songs = songs.unwrap_or_else(|| {
+        if let Ok(q) = conn.queue() {
+            q
+        } else {
+            Vec::new()
+        }
+    });
 
     tx.send(Songs::new(songs, song))?;
     Ok(())
@@ -84,7 +104,9 @@ fn play(conn: &mut Client, s: &Song) -> Result<()> {
     let songs = conn.queue()?;
     conn.pause(true)?;
     for song in songs.iter().filter(|song| **song == *s) {
-        conn.delete(song.place.unwrap().pos)?;
+        if let Some(p) = song.place {
+            conn.delete(p.pos)?;
+        }
     }
     conn.insert(s, 0)?;
     conn.switch(0)?;
@@ -109,7 +131,6 @@ pub enum Message {
 #[derive(Debug, Clone, Default)]
 pub struct Songs {
     songs: Vec<Song>,
-    tag_strs: Vec<String>,
     current_song: Option<PlayingSong>,
 }
 
@@ -122,7 +143,6 @@ struct PlayingSong {
 impl Songs {
     pub fn new(songs: Vec<Song>, current_song: Option<(Song, Status)>) -> Songs {
         Songs {
-            tag_strs: Songs::get_tags(&songs),
             songs,
             current_song: current_song.map(|(song, status)| PlayingSong::new(song, status)),
         }
@@ -133,7 +153,6 @@ impl Songs {
         self.current_song = current_song.map(|(song, status)| PlayingSong::new(song, status));
         if let Some(s) = songs {
             self.songs = s;
-            self.tag_strs = Self::get_tags(&self.songs);
         }
     }
 
@@ -143,37 +162,6 @@ impl Songs {
 
     pub fn is_song_empty(&self) -> bool {
         self.current_song.is_none()
-    }
-
-    pub fn tags(&self) -> &[String] {
-        &self.tag_strs
-    }
-
-    pub fn get_tags(items: &[Song]) -> Vec<String> {
-        items
-            .iter()
-            .map(|s| {
-                let mut buf = String::new();
-                s.tags.iter().take(s.tags.len() - 1).for_each(|(t, s)| {
-                    buf.push_str(&*t);
-                    buf.push_str(": ");
-                    buf.push_str(&*s);
-                    buf.push_str("\n");
-                });
-                if let Some((_, s)) = s.tags.iter().last() {
-                    let length = s.parse::<f64>().unwrap() as u64;
-                    let (minutes, seconds) = (length / 60, length % 60);
-                    buf.push_str(
-                        &(if seconds < 10 {
-                            format!("Length: {}:{}{}", minutes, "0", seconds)
-                        } else {
-                            format!("Length: {}:{}", minutes, seconds)
-                        }),
-                    );
-                }
-                buf
-            })
-            .collect()
     }
 }
 
