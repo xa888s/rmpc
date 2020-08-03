@@ -31,8 +31,7 @@ pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Rece
     thread::spawn(move || {
         // should update
         loop {
-            let (mut cached_song, mut cached_songs): (Option<Song>, Option<Vec<Song>>) =
-                (None, None);
+            let (mut cached_song, cached_songs): (Option<Song>, Option<Vec<Song>>) = (None, None);
             match rx.try_recv() {
                 Ok(m) => match m {
                     Message::Play(s) => {
@@ -145,14 +144,6 @@ impl Songs {
         Songs {
             songs,
             current_song: current_song.map(|(song, status)| PlayingSong::new(song, status)),
-        }
-    }
-
-    /// Will not set to None, rather the None signifies if you want to change it or not
-    pub fn set(&mut self, songs: Option<Vec<Song>>, current_song: Option<(Song, Status)>) {
-        self.current_song = current_song.map(|(song, status)| PlayingSong::new(song, status));
-        if let Some(s) = songs {
-            self.songs = s;
         }
     }
 

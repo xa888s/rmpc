@@ -1,14 +1,9 @@
 use crate::play::Songs;
 use mpd::Song;
-use std::{
-    ops::{Deref, DerefMut, Index, IndexMut},
-    slice::Iter,
-    vec::IntoIter,
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 use tui::{
-    style::{Color, Style},
     text::Span,
-    widgets::{List, ListItem, ListState, Row, Table},
+    widgets::{List, ListItem, ListState},
 };
 
 #[derive(Debug)]
