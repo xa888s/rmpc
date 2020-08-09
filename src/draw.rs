@@ -37,11 +37,11 @@ pub fn gauge<'a>(
     if let Some((song, status)) = events.song() {
         let (elapsed, duration) = match (status.elapsed, status.duration) {
             (Some(e), Some(d)) => (e.num_seconds() as f64, d.num_seconds() as f64),
-            // should never really go here evaluate to false
+            // should never really go here
             _ => (0., 1.),
         };
 
-        let mut title = song.title.unwrap_or("No title".to_string()) + " ";
+        let mut title = song.title.unwrap_or("Untitled".to_string()) + " ";
         title.insert_str(0, " ");
         let percent = (elapsed / duration) * 100.;
         let gauge = Gauge::default()

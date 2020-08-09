@@ -17,22 +17,33 @@ use crossterm::{
 use log::Level;
 use simple_logger;
 
-use std::{io, sync::mpsc::TryRecvError, thread, time::Duration};
+use std::{io, net::SocketAddrV4, sync::mpsc::TryRecvError, thread, time::Duration};
 
 use tui::{backend::CrosstermBackend, Terminal};
+
+use structopt::StructOpt;
+
+#[derive(StructOpt)]
+#[structopt(name = "rmpc")]
+struct Opt {
+    #[structopt(short, long, default_value = "127.0.0.1:6600")]
+    addr: SocketAddrV4,
+}
 
 const TICK_RATE: u64 = 17;
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
 fn main() -> Result<()> {
+    let opt = Opt::from_args();
+
     simple_logger::init_with_level(Level::Info)?;
     let mut term = start()?;
     term.hide_cursor()?;
 
     let input = input::get();
 
-    let (tx, rx) = play::start_client("127.0.0.1:6600")?;
+    let (tx, rx) = play::start_client(opt.addr)?;
 
     term.clear()?;
 
