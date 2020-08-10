@@ -12,4 +12,4 @@ After installation with the above command you can use the program with `rmpc`.
 
 ## Screenshot
 ### Subject to LOTS of change
-![Screenshot](https://i.imgur.com/1cvzu35.png)
+![Screenshot](https://i.imgur.com/54cwJVM.png)
