@@ -1,4 +1,4 @@
-use crate::{play::Songs, state::StatefulList};
+use crate::{play::Songs, state::StatefulList, Mode};
 use mpd::Song;
 use std::io;
 use tui::{
@@ -7,7 +7,7 @@ use tui::{
     style::{Color, Style},
     terminal::Frame,
     text::Span,
-    widgets::{Block, BorderType, Borders, Gauge, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph, Wrap},
 };
 
 pub fn list<'a>(
@@ -75,10 +75,36 @@ pub fn tags<'a>(
     }
 }
 
+pub fn search<'a>(
+    events: &mut StatefulList<Songs, Song>,
+    f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
+    chunk: Rect,
+    input: &str,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1)])
+        .split(chunk);
+
+    let input = Paragraph::new(input)
+        .block(
+            Block::default()
+                .title(" Search ")
+                .border_type(BorderType::Rounded)
+                .borders(Borders::ALL),
+        )
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(Clear, chunk);
+    f.render_widget(input, chunks[0])
+}
+
 pub fn chunks<'a>(
     events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
-) -> (Vec<Rect>, Vec<Rect>) {
+    mode: &Mode,
+) -> (Vec<Rect>, Vec<Rect>, Option<Rect>) {
     let constraints = if events.is_empty() {
         [Constraint::Percentage(100)].as_ref()
     } else {
@@ -90,16 +116,60 @@ pub fn chunks<'a>(
         .constraints(constraints)
         .split(f.size());
 
-    let constraints = if events.is_song_empty() {
-        [Constraint::Percentage(100)].as_ref()
+    let sub_chunks = if events.is_song_empty() {
+        [chunks[0]].to_vec()
     } else {
-        [Constraint::Min(3), Constraint::Max(3)].as_ref()
+        let chunk = chunks[0];
+
+        match (chunk.height.checked_sub(3), f.size().height.checked_sub(3)) {
+            (Some(height), Some(y)) => {
+                let list = Rect {
+                    x: chunk.x,
+                    y: chunk.y,
+                    width: chunk.width,
+                    height,
+                };
+
+                let gauge = Rect {
+                    x: chunk.x,
+                    y,
+                    width: chunk.width,
+                    // fixed height
+                    height: 3,
+                };
+
+                [list, gauge].to_vec()
+            }
+            _ => [chunk].to_vec(),
+        }
     };
 
-    let sub_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(chunks[0]);
+    if let Mode::Searching(_) = mode {
+        let popup_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - 10) / 2),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage((100 - 10) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(f.size());
 
-    (chunks, sub_chunks)
+        let rect = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - 20) / 2),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage((100 - 20) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(popup_layout[1])[1];
+        (chunks, sub_chunks, Some(rect))
+    } else {
+        (chunks, sub_chunks, None)
+    }
 }

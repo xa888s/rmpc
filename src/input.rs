@@ -17,6 +17,7 @@ use anyhow::Result;
 use crate::{
     play::{Message, Songs},
     state::StatefulList,
+    Mode,
 };
 use mpd::Song;
 
@@ -49,35 +50,55 @@ pub fn get() -> Receiver<KeyEvent> {
 pub fn use_key(
     tx: &Sender<Message>,
     events: &mut StatefulList<Songs, Song>,
+    mode: &mut Mode,
     code: KeyCode,
 ) -> Result<bool> {
     let mut should_break = false;
-    match code {
-        KeyCode::Char(c) => match c {
-            'q' => should_break = true,
-            'j' => events.next(),
-            'k' => events.previous(),
-            'g' => events.select(0),
-            'G' => events.select_last(),
-            'd' => {
-                if let Some(i) = events.selected_index() {
-                    tx.send(Message::Delete(i))?;
-                }
+    if let Mode::Searching(s) = mode {
+        match code {
+            KeyCode::Char(c) => {
+                s.push(c);
             }
-            'p' => {
-                tx.send(Message::TogglePause)?;
+            KeyCode::Enter => {}
+            KeyCode::Backspace => {
+                s.pop();
+            }
+            KeyCode::Esc => {
+                *mode = Mode::Browsing;
             }
             _ => {}
-        },
-        KeyCode::Enter => {
-            if let Some(s) = events.selected() {
-                let song = s.clone();
-                tx.send(Message::Play(song))?;
-                events.select(0);
-            }
         }
-        KeyCode::Esc => should_break = true,
-        _ => {}
+    } else {
+        match code {
+            KeyCode::Char(c) => match c {
+                'q' => should_break = true,
+                'j' => events.next(),
+                'k' => events.previous(),
+                'g' => events.select(0),
+                'G' => events.select_last(),
+                'd' => {
+                    if let Some(i) = events.selected_index() {
+                        tx.send(Message::Delete(i))?;
+                    }
+                }
+                '/' => *mode = Mode::Searching(String::new()),
+                'p' => {
+                    tx.send(Message::TogglePause)?;
+                }
+                _ => {}
+            },
+            KeyCode::Enter => {
+                if let Mode::Browsing = mode {
+                    if let Some(s) = events.selected() {
+                        let song = s.clone();
+                        tx.send(Message::Play(song))?;
+                        events.select(0);
+                    }
+                }
+            }
+            KeyCode::Esc => {}
+            _ => {}
+        }
     }
     Ok(should_break)
 }

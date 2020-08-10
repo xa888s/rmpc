@@ -14,8 +14,7 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use log::Level;
-use simple_logger;
+use env_logger;
 
 use std::{io, net::SocketAddrV4, sync::mpsc::TryRecvError, thread, time::Duration};
 
@@ -30,6 +29,12 @@ struct Opt {
     addr: SocketAddrV4,
 }
 
+#[derive(Clone)]
+pub enum Mode {
+    Browsing,
+    Searching(String),
+}
+
 const TICK_RATE: u64 = 17;
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
@@ -37,28 +42,31 @@ type Term = Terminal<CrosstermBackend<io::Stdout>>;
 fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    simple_logger::init_with_level(Level::Info)?;
+    env_logger::init();
     let mut term = start()?;
     term.hide_cursor()?;
 
     let input = input::get();
 
+    log::debug!("Starting MPD thread");
     let (tx, rx) = play::start_client(opt.addr)?;
 
     term.clear()?;
 
+    log::debug!("Getting initial song info");
     tx.send(Message::Refresh)?;
     let songs: Songs = rx.try_recv().unwrap_or_default();
 
     let mut events = StatefulList::new_with_songs(songs);
+    let mut mode: Mode = Mode::Browsing;
 
     loop {
         thread::sleep(Duration::from_millis(TICK_RATE));
-        draw(&mut term, &mut events)?;
+        draw(&mut term, &mut events, &mut mode)?;
 
         // handling key events
         if let Ok(k) = input.try_recv() {
-            if let Ok(b) = input::use_key(&tx, &mut events, k.code) {
+            if let Ok(b) = input::use_key(&tx, &mut events, &mut mode, k.code) {
                 if b {
                     break;
                 }
@@ -101,17 +109,25 @@ fn end(mut term: Term) -> Result<()> {
     Ok(())
 }
 
-fn draw(term: &mut Term, events: &mut StatefulList<Songs, Song>) -> Result<()> {
+fn draw(term: &mut Term, events: &mut StatefulList<Songs, Song>, mode: &mut Mode) -> Result<()> {
     term.draw(|f| {
-        let (chunks, sub_chunks) = draw::chunks(events, f);
+        let (chunks, sub_chunks, search) = draw::chunks(events, f, &mode);
         let list_chunk = match (chunks.len(), sub_chunks.len()) {
             (2, 2) => {
                 draw::tags(events, f, chunks[1]);
                 draw::gauge(events, f, sub_chunks[1]);
                 sub_chunks[0]
             }
+            (2, 1) => {
+                draw::tags(events, f, chunks[1]);
+                sub_chunks[0]
+            }
             (_, _) => chunks[0],
         };
+
+        if let Mode::Searching(i) = mode {
+            draw::search(events, f, search.unwrap(), &i);
+        }
 
         draw::list(events, f, list_chunk);
     })
