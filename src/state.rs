@@ -27,16 +27,16 @@ where
         &mut self.state
     }
 
-    pub fn selected(&self) -> Option<&A> {
-        self.state.selected().map(|i| &self.items[i])
-    }
-
     pub fn selected_index(&self) -> Option<usize> {
         self.state.selected()
     }
 }
 
 impl StatefulList<Songs, Song> {
+    pub fn selected(&self) -> Option<&Song> {
+        self.state.selected().map(|i| self.items.get(i)).flatten()
+    }
+
     pub fn list<'a>(&self) -> List<'a> {
         List::new(
             self.items
@@ -47,19 +47,23 @@ impl StatefulList<Songs, Song> {
     }
 
     pub fn tags(&self) -> Option<String> {
-        self.state.selected().map(|i| {
-            self.items[i]
-                .tags
-                .iter()
-                .take(self.items[i].tags.len() - 1)
-                .fold(String::new(), |mut tags, (t, s)| {
-                    tags.push_str(&*t);
-                    tags.push_str(": ");
-                    tags.push_str(&*s);
-                    tags.push_str("\n");
-                    tags
+        self.state
+            .selected()
+            .map(|i| {
+                self.items.get(i).map(|song| {
+                    song.tags.iter().take(self.items[i].tags.len() - 1).fold(
+                        String::new(),
+                        |mut tags, (t, s)| {
+                            tags.push_str(&*t);
+                            tags.push_str(": ");
+                            tags.push_str(&*s);
+                            tags.push_str("\n");
+                            tags
+                        },
+                    )
                 })
-        })
+            })
+            .flatten()
     }
 
     pub fn new_with_songs(songs: Songs) -> StatefulList<Songs, Song> {
@@ -73,11 +77,15 @@ impl StatefulList<Songs, Song> {
     }
 
     pub fn select(&mut self, index: usize) {
-        self.state.select(Some(if index == 0 {
-            index
+        self.state.select(if self.items.len() != 0 {
+            Some(if index == 0 {
+                index
+            } else {
+                self.items.len() % index
+            })
         } else {
-            self.items.len() % index
-        }));
+            None
+        });
     }
 
     pub fn select_last(&mut self) {

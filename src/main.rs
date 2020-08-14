@@ -111,25 +111,27 @@ fn end(mut term: Term) -> Result<()> {
 
 fn draw(term: &mut Term, events: &mut StatefulList<Songs, Song>, mode: &mut Mode) -> Result<()> {
     term.draw(|f| {
-        let (chunks, sub_chunks, search) = draw::chunks(events, f, &mode);
-        let list_chunk = match (chunks.len(), sub_chunks.len()) {
-            (2, 2) => {
-                draw::tags(events, f, chunks[1]);
-                draw::gauge(events, f, sub_chunks[1]);
-                sub_chunks[0]
-            }
-            (2, 1) => {
-                draw::tags(events, f, chunks[1]);
-                sub_chunks[0]
-            }
-            (_, _) => chunks[0],
-        };
+        let chunks = draw::chunks(events, f);
+        if let draw::DrawLayout::Normal {
+            songs,
+            gauge,
+            search,
+        } = chunks
+        {
+            let draw::Chunks { list, tags } = songs;
+            draw::tags(events, f, tags);
+            draw::gauge(events, f, gauge);
+            draw::list(events, f, list);
 
-        if let Mode::Searching(i) = mode {
-            draw::search(events, f, search.unwrap(), &i);
+            if let Mode::Searching(i) = mode {
+                draw::search(events, f, search, &i);
+            }
+        } else if let draw::DrawLayout::Empty(songs, search) = chunks {
+            draw::list(events, f, songs);
+            if let Mode::Searching(i) = mode {
+                draw::search(events, f, search, &i);
+            }
         }
-
-        draw::list(events, f, list_chunk);
     })
     .context("Error in rendering loop")
 }

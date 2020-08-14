@@ -1,4 +1,4 @@
-use crate::{play::Songs, state::StatefulList, Mode};
+use crate::{play::Songs, state::StatefulList};
 use mpd::Song;
 use std::io;
 use tui::{
@@ -9,6 +9,22 @@ use tui::{
     text::Span,
     widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph, Wrap},
 };
+
+// Playing layout
+//
+//       Song list             Tags for selected song
+//          \/                           \/
+// /---------------------------------------------\
+// |                      |                      |
+// |                      |                      |
+// |                      |                      |
+// |                      |                      |
+// |                      |                      |
+// |______________________|______________________|
+// | ---------------->                           |
+// \_____________________________________________/
+//            /\
+//  Progress of current song
 
 pub fn list<'a>(
     events: &mut StatefulList<Songs, Song>,
@@ -69,14 +85,13 @@ pub fn tags<'a>(
                     .border_type(BorderType::Rounded)
                     .borders(Borders::ALL),
             )
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true });
+            .alignment(Alignment::Center);
         f.render_widget(tags, chunk);
     }
 }
 
 pub fn search<'a>(
-    events: &mut StatefulList<Songs, Song>,
+    _events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
     input: &str,
@@ -103,73 +118,114 @@ pub fn search<'a>(
 pub fn chunks<'a>(
     events: &mut StatefulList<Songs, Song>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
-    mode: &Mode,
-) -> (Vec<Rect>, Vec<Rect>, Option<Rect>) {
-    let constraints = if events.is_empty() {
-        [Constraint::Percentage(100)].as_ref()
-    } else {
-        [Constraint::Percentage(70), Constraint::Percentage(30)].as_ref()
-    };
+) -> DrawLayout {
+    let term = f.size();
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(f.size());
+    let chunks = term
+        .height
+        .checked_sub(3)
+        .map(|height| {
+            let songs = Rect {
+                x: term.x,
+                y: term.y,
+                width: term.width,
+                height,
+            };
 
-    let sub_chunks = if events.is_song_empty() {
-        [chunks[0]].to_vec()
-    } else {
-        let chunk = chunks[0];
+            let gauge = Rect {
+                x: term.x,
+                y: height,
+                width: term.width,
+                // fixed height
+                height: 3,
+            };
+            (songs, gauge)
+        })
+        .map(|(songs, gauge)| {
+            events
+                .tags()
+                .map(|tags| {
+                    let longest = (tags.split("\n").fold(0, |mut l, s| {
+                    if l < s.len() {
+                        l = s.len();
+                    }
+                    l
+                 }) as u16)
+                 // damn newlines taking up 2 bytes!
+                     + 2;
+                    songs.width.checked_sub(longest).map(|list_size| {
+                        // space the list takes up
+                        let list = Rect {
+                            x: songs.x,
+                            y: songs.y,
+                            width: list_size,
+                            height: songs.height,
+                        };
 
-        match (chunk.height.checked_sub(3), f.size().height.checked_sub(3)) {
-            (Some(height), Some(y)) => {
-                let list = Rect {
-                    x: chunk.x,
-                    y: chunk.y,
-                    width: chunk.width,
-                    height,
-                };
+                        // space the tags take up
+                        let tags = Rect {
+                            x: list_size,
+                            y: songs.y,
+                            width: longest,
+                            height: songs.height,
+                        };
 
-                let gauge = Rect {
-                    x: chunk.x,
-                    y,
-                    width: chunk.width,
-                    // fixed height
-                    height: 3,
-                };
-
-                [list, gauge].to_vec()
-            }
-            _ => [chunk].to_vec(),
+                        (Chunks { list, tags }, gauge)
+                    })
+                })
+                .flatten()
+        })
+        .flatten();
+    let search = search_box(term);
+    if let Some((songs, gauge)) = chunks {
+        DrawLayout::Normal {
+            songs,
+            gauge,
+            search,
         }
-    };
-
-    if let Mode::Searching(_) = mode {
-        let popup_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Percentage((100 - 10) / 2),
-                    Constraint::Percentage(10),
-                    Constraint::Percentage((100 - 10) / 2),
-                ]
-                .as_ref(),
-            )
-            .split(f.size());
-
-        let rect = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(
-                [
-                    Constraint::Percentage((100 - 20) / 2),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage((100 - 20) / 2),
-                ]
-                .as_ref(),
-            )
-            .split(popup_layout[1])[1];
-        (chunks, sub_chunks, Some(rect))
     } else {
-        (chunks, sub_chunks, None)
+        DrawLayout::Empty(term, search)
     }
+}
+
+fn search_box(frame_size: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - 10) / 2),
+                Constraint::Percentage(10),
+                Constraint::Percentage((100 - 10) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(frame_size);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - 20) / 2),
+                Constraint::Percentage(20),
+                Constraint::Percentage((100 - 20) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum DrawLayout {
+    Normal {
+        songs: Chunks,
+        gauge: Rect,
+        search: Rect,
+    },
+    Empty(Rect, Rect),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Chunks {
+    pub list: Rect,
+    pub tags: Rect,
 }

@@ -78,22 +78,12 @@ fn update(
     songs: Option<Vec<Song>>,
     song: Option<Song>,
 ) -> Result<()> {
-    let song = match (song, conn.status()) {
-        (Some(s), Ok(status)) => Some((s, status)),
-        (None, Ok(status)) => match conn.currentsong() {
-            Ok(Some(s)) => Some((s, status)),
-            _ => None,
-        },
-        _ => None,
-    };
+    let current_song = song.or_else(|| conn.currentsong().ok().flatten());
+    let status = conn.status().ok();
 
-    let songs = songs.unwrap_or_else(|| {
-        if let Ok(q) = conn.queue() {
-            q
-        } else {
-            Vec::new()
-        }
-    });
+    let song = current_song.and_then(|song| status.map(|status| (song, status)));
+
+    let songs = songs.unwrap_or_else(|| conn.queue().ok().unwrap_or_else(Vec::new));
 
     tx.send(Songs::new(songs, song))?;
     Ok(())
@@ -149,10 +139,6 @@ impl Songs {
 
     pub fn song(&self) -> Option<(Song, Status)> {
         self.current_song.clone().map(|s| (s.song, s.status))
-    }
-
-    pub fn is_song_empty(&self) -> bool {
-        self.current_song.is_none()
     }
 }
 
