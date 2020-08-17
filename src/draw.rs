@@ -141,11 +141,9 @@ pub fn chunks<'a>(
             };
             (songs, gauge)
         })
-        .map(|(songs, gauge)| {
-            events
-                .tags()
-                .map(|tags| {
-                    let longest = (tags.split("\n").fold(0, |mut l, s| {
+        .and_then(|(songs, gauge)| {
+            events.tags().and_then(|tags| {
+                let longest = (tags.split("\n").fold(0, |mut l, s| {
                     if l < s.len() {
                         l = s.len();
                     }
@@ -153,29 +151,27 @@ pub fn chunks<'a>(
                  }) as u16)
                  // damn newlines taking up 2 bytes!
                      + 2;
-                    songs.width.checked_sub(longest).map(|list_size| {
-                        // space the list takes up
-                        let list = Rect {
-                            x: songs.x,
-                            y: songs.y,
-                            width: list_size,
-                            height: songs.height,
-                        };
+                songs.width.checked_sub(longest).map(|list_size| {
+                    // space the list takes up
+                    let list = Rect {
+                        x: songs.x,
+                        y: songs.y,
+                        width: list_size,
+                        height: songs.height,
+                    };
 
-                        // space the tags take up
-                        let tags = Rect {
-                            x: list_size,
-                            y: songs.y,
-                            width: longest,
-                            height: songs.height,
-                        };
+                    // space the tags take up
+                    let tags = Rect {
+                        x: list_size,
+                        y: songs.y,
+                        width: longest,
+                        height: songs.height,
+                    };
 
-                        (Chunks { list, tags }, gauge)
-                    })
+                    (Chunks { list, tags }, gauge)
                 })
-                .flatten()
-        })
-        .flatten();
+            })
+        });
     let search = search_box(term);
     if let Some((songs, gauge)) = chunks {
         DrawLayout::Normal {
