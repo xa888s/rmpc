@@ -1,83 +1,77 @@
-use crate::play::Songs;
-use mpd::Song;
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use async_mpd::Track;
+use std::{
+    cell::{RefCell, RefMut},
+    ops::{Deref, DerefMut, Index, IndexMut},
+};
 use tui::{
     text::Span,
     widgets::{List, ListItem, ListState},
 };
 
-#[derive(Debug)]
-pub struct StatefulList<T, A>
-where
-    T: Index<usize, Output = A> + IndexMut<usize, Output = A>,
-{
+#[derive(Debug, Clone)]
+pub struct StatefulList<T> {
     items: T,
-    state: ListState,
+    state: RefCell<ListState>,
 }
 
-impl<T, A> StatefulList<T, A>
+impl<T, A> StatefulList<T>
 where
     T: Index<usize, Output = A> + IndexMut<usize, Output = A>,
 {
-    pub fn set_items(&mut self, items: T) {
-        self.items = items;
-    }
-
-    pub fn state(&mut self) -> &mut ListState {
-        &mut self.state
-    }
-
-    pub fn selected_index(&self) -> Option<usize> {
-        self.state.selected()
+    pub fn state(&self) -> RefMut<ListState> {
+        self.state.borrow_mut()
     }
 }
 
-impl StatefulList<Songs, Song> {
-    pub fn selected(&self) -> Option<&Song> {
-        self.state.selected().map(|i| self.items.get(i)).flatten()
+impl<T> StatefulList<T>
+where
+    T: Deref<Target = Vec<Track>>,
+{
+    pub fn selected(&self) -> Option<&Track> {
+        self.state
+            .borrow()
+            .selected()
+            .map(|i| self.items.get(i))
+            .flatten()
     }
 
-    pub fn list<'a>(&self) -> List<'a> {
+    pub fn list(&self) -> List<'_> {
         List::new(
             self.items
                 .iter()
-                .map(|s| ListItem::new(Span::raw(s.title.clone().unwrap_or("Default".to_string()))))
-                .collect::<Vec<ListItem<'a>>>(),
+                .map(|s| ListItem::new(Span::raw(s.title.as_deref().unwrap_or_else(|| "Untitled"))))
+                .collect::<Vec<ListItem<'_>>>(),
         )
     }
 
     pub fn tags(&self) -> Option<String> {
-        self.state
-            .selected()
-            .map(|i| {
-                self.items.get(i).map(|song| {
-                    song.tags.iter().take(self.items[i].tags.len() - 1).fold(
-                        String::new(),
-                        |mut tags, (t, s)| {
-                            tags.push_str(&*t);
-                            tags.push_str(": ");
-                            tags.push_str(&*s);
-                            tags.push_str("\n");
-                            tags
-                        },
-                    )
-                })
+        self.state.borrow().selected().and_then(|i| {
+            self.items.get(i).map(|song| {
+                let tags = [
+                    ("Title:", &song.title),
+                    ("Album:", &song.album),
+                    ("Artist:", &song.artist),
+                    ("Release Date:", &song.date),
+                ];
+
+                tags.iter()
+                    .filter_map(|(n, t)| {
+                        t.as_ref().map(|t| {
+                            let mut buf = String::with_capacity(n.len() + t.len());
+                            buf.push_str(n);
+                            buf.push_str(" ");
+                            buf.push_str(t);
+                            buf.push('\n');
+                            buf
+                        })
+                    })
+                    .collect()
             })
-            .flatten()
-    }
-
-    pub fn new_with_songs(songs: Songs) -> StatefulList<Songs, Song> {
-        let mut state = ListState::default();
-        state.select(Some(0));
-
-        StatefulList {
-            items: songs,
-            state,
-        }
+        })
     }
 
     pub fn select(&mut self, index: usize) {
-        self.state.select(if self.items.len() != 0 {
+        self.state.borrow_mut().select(if self.items.len() != 0 {
             Some(if index == 0 {
                 index
             } else {
@@ -89,33 +83,50 @@ impl StatefulList<Songs, Song> {
     }
 
     pub fn select_last(&mut self) {
-        self.state.select(Some(self.items.len() - 1));
+        self.state.borrow_mut().select(Some(self.items.len() - 1));
     }
 
     // Select the next item. This will not be reflected until the widget is drawn in the
     // `Terminal::draw` callback using `Frame::render_stateful_widget`.
     pub fn next(&mut self) {
-        self.state.select(Some(
+        let index = Some({
             self.state
+                .borrow()
                 .selected()
                 .map(|i| if i >= self.items.len() - 1 { 0 } else { i + 1 })
-                .unwrap_or(0),
-        ));
+                .unwrap_or(0)
+        });
+        self.state.borrow_mut().select(index);
     }
 
     // Select the previous item. This will not be reflected until the widget is drawn in the
     // `Terminal::draw` callback using `Frame::render_stateful_widget`.
     pub fn previous(&mut self) {
-        self.state.select(Some(
+        let index = Some({
             self.state
+                .borrow()
                 .selected()
                 .map(|i| if i == 0 { self.items.len() - 1 } else { i - 1 })
-                .unwrap_or(0),
-        ));
+                .unwrap_or(0)
+        });
+
+        self.state.borrow_mut().select(index);
     }
 }
 
-impl<T, A> Deref for StatefulList<T, A>
+impl<T> Default for StatefulList<T>
+where
+    T: Default,
+{
+    fn default() -> Self {
+        Self {
+            items: T::default(),
+            state: RefCell::new(ListState::default()),
+        }
+    }
+}
+
+impl<T, A> Deref for StatefulList<T>
 where
     T: Index<usize, Output = A> + IndexMut<usize, Output = A>,
 {
@@ -126,7 +137,7 @@ where
     }
 }
 
-impl<T, A> DerefMut for StatefulList<T, A>
+impl<T, A> DerefMut for StatefulList<T>
 where
     T: Index<usize, Output = A> + IndexMut<usize, Output = A>,
 {

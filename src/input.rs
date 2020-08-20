@@ -1,104 +1,88 @@
-use crossterm::{
-    event,
-    event::Event,
-    event::{KeyCode, KeyEvent},
-};
-use std::{
-    sync::{
-        mpsc,
-        mpsc::{Receiver, Sender},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use crossterm::event::KeyCode;
 
 use anyhow::Result;
 
-use crate::{
-    play::{Message, Songs},
-    state::StatefulList,
-    Mode,
-};
-use mpd::Song;
+use crate::{play::Songs, search::Search, state::StatefulList, Mode};
+use async_mpd::MpdClient;
 
-pub fn get() -> Receiver<KeyEvent> {
-    let (tx, rx) = mpsc::channel();
-
-    let rate = Duration::from_millis(crate::TICK_RATE);
-    thread::spawn(move || {
-        let mut last_tick = Instant::now();
-        loop {
-            if let Ok(s) = event::poll(rate - last_tick.elapsed()) {
-                if s {
-                    if let Ok(event) = event::read() {
-                        if let Event::Key(k) = event {
-                            if let Err(_) = tx.send(k) {
-                                log::warn!("Failed to send key event")
-                            }
-                        }
-                    }
-                }
-            }
-            if last_tick.elapsed() >= rate {
-                last_tick = Instant::now();
-            }
-        }
-    });
-    rx
-}
-
-pub fn use_key(
-    tx: &Sender<Message>,
-    events: &mut StatefulList<Songs, Song>,
+pub async fn use_key(
+    client: &mut MpdClient,
+    list: &mut StatefulList<Songs>,
+    results: &mut StatefulList<Songs>,
+    srch: &mut Search,
     mode: &mut Mode,
     code: KeyCode,
-) -> Result<bool> {
-    let mut should_break = false;
-    if let Mode::Searching(s) = mode {
+) -> Result<Status> {
+    if let Mode::Searching = mode {
         match code {
             KeyCode::Char(c) => {
-                s.push(c);
+                srch.push(c);
+                srch.search(client).await?;
+                results.set_songs(srch.results().to_owned());
             }
-            KeyCode::Enter => {}
+            KeyCode::Enter => {
+                results.next();
+                *mode = Mode::Selecting;
+            }
             KeyCode::Backspace => {
-                s.pop();
+                srch.pop();
+                srch.search(client).await?;
+                results.set_songs(srch.results().to_owned());
             }
-            KeyCode::Esc => {
-                *mode = Mode::Browsing;
+            KeyCode::Esc => *mode = Mode::Browsing,
+            _ => {}
+        }
+    } else if let Mode::Selecting = mode {
+        match code {
+            KeyCode::Char(c) => match c {
+                'j' => results.next(),
+                'k' => results.previous(),
+                'g' => results.select(0),
+                'G' => results.select_last(),
+                _ => {}
+            },
+            KeyCode::Enter => {
+                if let Some(s) = results.selected() {
+                    client.queue_add(&s.file).await?;
+                    let id = client.queue().await?.last().map(|s| s.id).flatten();
+                    if let Some(id) = id {
+                        client.playid(id).await?;
+                    }
+                    *mode = Mode::Browsing;
+                }
             }
+            KeyCode::Esc => *mode = Mode::Searching,
             _ => {}
         }
     } else {
         match code {
             KeyCode::Char(c) => match c {
-                'q' => should_break = true,
-                'j' => events.next(),
-                'k' => events.previous(),
-                'g' => events.select(0),
-                'G' => events.select_last(),
-                'd' => {
-                    if let Some(i) = events.selected_index() {
-                        tx.send(Message::Delete(i))?;
-                    }
-                }
-                '/' => *mode = Mode::Searching(String::new()),
-                'p' => {
-                    tx.send(Message::TogglePause)?;
-                }
+                'q' => return Ok(Status::Break),
+                'j' => list.next(),
+                'k' => list.previous(),
+                'g' => list.select(0),
+                'G' => list.select_last(),
+                '/' => *mode = Mode::Searching,
+                'p' => match client.status().await?.state.as_str() {
+                    "pause" => client.play().await?,
+                    "play" | _ => client.pause().await?,
+                },
                 _ => {}
             },
             KeyCode::Enter => {
-                if let Mode::Browsing = mode {
-                    if let Some(s) = events.selected() {
-                        let song = s.clone();
-                        tx.send(Message::Play(song))?;
-                        events.select(0);
+                if let Some(s) = list.selected() {
+                    if let Some(id) = s.id {
+                        client.playid(id).await?;
                     }
                 }
             }
-            KeyCode::Esc => {}
-            _ => {}
+            KeyCode::Esc | _ => {}
         }
     }
-    Ok(should_break)
+    Ok(Status::Continue)
+}
+
+pub enum Status {
+    Continue,
+    Break,
 }

@@ -1,149 +1,28 @@
-use anyhow::{Context, Result};
-use mpd::{Client, Song, Status};
-use std::{
-    net::ToSocketAddrs,
-    ops::{Deref, DerefMut, Index, IndexMut},
-    sync::mpsc,
-    sync::mpsc::{Receiver, Sender, TryRecvError},
-    thread,
-    time::Duration,
-};
+use async_mpd::{Status, Track};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-pub fn start_client<'a>(ip: impl ToSocketAddrs) -> Result<(Sender<Message>, Receiver<Songs>)> {
-    let mut conn = Client::connect(ip).context("Failed to connect to MPD server")?;
-
-    // Channels
-    //
-    // message_tx
-    // main thread -> to this thread
-    //
-    // used to send MPD commands from this thread
-    //
-    // response_rx
-    // this thread -> to main thread
-    //
-    // used to return results or other from MPD
-    //
-
-    let (message_tx, rx) = mpsc::channel();
-    let (tx, response_rx) = mpsc::channel();
-
-    thread::spawn(move || {
-        // should update
-        loop {
-            let (mut cached_song, cached_songs): (Option<Song>, Option<Vec<Song>>) = (None, None);
-            match rx.try_recv() {
-                Ok(m) => match m {
-                    Message::Play(s) => {
-                        if let Err(_) = play(&mut conn, &s) {
-                            log::warn!("Failed to play song");
-                        }
-                        cached_song = Some(s);
-                    }
-                    Message::Delete(i) => {
-                        if let Err(_) = conn.delete(i as u32) {
-                            log::warn!("Failed to delete song from queue");
-                        }
-                    }
-                    Message::TogglePause => {
-                        if let Err(_) = conn.toggle_pause() {
-                            log::warn!("Failed to pause song");
-                        }
-                    }
-
-                    Message::Refresh => {
-                        if let Err(_) = update(&mut conn, &tx, None, None) {
-                            break;
-                        }
-                    }
-                },
-                Err(e) => {
-                    if let TryRecvError::Disconnected = e {
-                        break;
-                    }
-                }
-            }
-            if let Err(_) = update(&mut conn, &tx, cached_songs, cached_song) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
-    Ok((message_tx, response_rx))
-}
-
-fn update(
-    conn: &mut Client,
-    tx: &Sender<Songs>,
-    songs: Option<Vec<Song>>,
-    song: Option<Song>,
-) -> Result<()> {
-    let current_song = song.or_else(|| conn.currentsong().ok().flatten());
-    let status = conn.status().ok();
-
-    let song = current_song.and_then(|song| status.map(|status| (song, status)));
-
-    let songs = songs.unwrap_or_else(|| conn.queue().ok().unwrap_or_else(Vec::new));
-
-    tx.send(Songs::new(songs, song))?;
-    Ok(())
-}
-
-fn play(conn: &mut Client, s: &Song) -> Result<()> {
-    let songs = conn.queue()?;
-    conn.pause(true)?;
-    for song in songs.iter().filter(|song| **song == *s) {
-        if let Some(p) = song.place {
-            conn.delete(p.pos)?;
-        }
-    }
-    conn.insert(s, 0)?;
-    conn.switch(0)?;
-    conn.pause(false)?;
-    Ok(())
-}
-
-pub enum Message {
-    /// Used to play song
-    Play(Song),
-
-    /// Used to delete song from main queue
-    Delete(usize),
-
-    /// Used to toggle the playing status of the current song
-    TogglePause,
-
-    /// Used to get lastest data sent to thread
-    Refresh,
-}
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Songs {
-    songs: Vec<Song>,
-    current_song: Option<PlayingSong>,
-}
-
-#[derive(Debug, Clone)]
-struct PlayingSong {
-    pub song: Song,
-    pub status: Status,
+    songs: Vec<Track>,
+    status: Option<Status>,
 }
 
 impl Songs {
-    pub fn new(songs: Vec<Song>, current_song: Option<(Song, Status)>) -> Songs {
-        Songs {
-            songs,
-            current_song: current_song.map(|(song, status)| PlayingSong::new(song, status)),
-        }
+    pub fn status(&self) -> Option<&Status> {
+        self.status.as_ref()
     }
 
-    pub fn song(&self) -> Option<(Song, Status)> {
-        self.current_song.clone().map(|s| (s.song, s.status))
+    pub fn set_status(&mut self, status: Option<Status>) {
+        self.status = status;
+    }
+
+    pub fn set_songs(&mut self, songs: Vec<Track>) {
+        self.songs = songs;
     }
 }
 
 impl Deref for Songs {
-    type Target = Vec<Song>;
+    type Target = Vec<Track>;
     fn deref(&self) -> &Self::Target {
         &self.songs
     }
@@ -156,7 +35,7 @@ impl DerefMut for Songs {
 }
 
 impl Index<usize> for Songs {
-    type Output = Song;
+    type Output = Track;
     fn index(&self, index: usize) -> &Self::Output {
         &self.songs[index]
     }
@@ -165,11 +44,5 @@ impl Index<usize> for Songs {
 impl IndexMut<usize> for Songs {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.songs[index]
-    }
-}
-
-impl PlayingSong {
-    pub fn new(song: Song, status: Status) -> PlayingSong {
-        PlayingSong { song, status }
     }
 }

@@ -1,14 +1,16 @@
-use crate::{play::Songs, state::StatefulList};
-use mpd::Song;
+use crate::{play::Songs, search::Search, state::StatefulList};
+use async_mpd::Status;
 use std::io;
 use tui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Style},
     terminal::Frame,
     text::Span,
-    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph},
 };
+
+const SEARCH_BOX_HEIGHT: u16 = 3;
 
 // Playing layout
 //
@@ -27,7 +29,7 @@ use tui::{
 //  Progress of current song
 
 pub fn list<'a>(
-    events: &mut StatefulList<Songs, Song>,
+    events: &mut StatefulList<Songs>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
@@ -42,23 +44,21 @@ pub fn list<'a>(
         )
         .highlight_style(Style::default().fg(Color::Magenta))
         .highlight_symbol(">> ");
-    f.render_stateful_widget(list, chunk, events.state());
+    f.render_stateful_widget(list, chunk, &mut *events.state());
 }
 
 pub fn gauge<'a>(
-    events: &mut StatefulList<Songs, Song>,
+    status: Option<&Status>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
-    if let Some((song, status)) = events.song() {
+    if let Some(status) = status {
         let (elapsed, duration) = match (status.elapsed, status.duration) {
-            (Some(e), Some(d)) => (e.num_seconds() as f64, d.num_seconds() as f64),
+            (Some(e), Some(d)) => (e.as_secs_f64(), d.as_secs_f64()),
             // should never really go here
             _ => (0., 1.),
         };
 
-        let mut title = song.title.unwrap_or("Untitled".to_string()) + " ";
-        title.insert_str(0, " ");
         let percent = (elapsed / duration) * 100.;
         let gauge = Gauge::default()
             .block(
@@ -73,11 +73,11 @@ pub fn gauge<'a>(
 }
 
 pub fn tags<'a>(
-    events: &mut StatefulList<Songs, Song>,
+    tags: Option<String>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
 ) {
-    if let Some(tags) = events.tags() {
+    if let Some(tags) = tags {
         let tags = Paragraph::new(&*tags)
             .block(
                 Block::default()
@@ -91,39 +91,83 @@ pub fn tags<'a>(
 }
 
 pub fn search<'a>(
-    _events: &mut StatefulList<Songs, Song>,
+    list: &mut StatefulList<Songs>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
     chunk: Rect,
-    input: &str,
+    input: &Search,
 ) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(1)])
-        .split(chunk);
+    let width = chunk.width;
 
-    let input = Paragraph::new(input)
+    let search_box = Paragraph::new(input.get(width as usize))
         .block(
             Block::default()
                 .title(" Search ")
                 .border_type(BorderType::Rounded)
+                .style(Style::default().fg(Color::Reset))
                 .borders(Borders::ALL),
         )
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: true });
+        .alignment(Alignment::Left);
 
-    f.render_widget(Clear, chunk);
-    f.render_widget(input, chunks[0])
+    if input.results().is_empty() {
+        let middle = chunk.height / 2;
+
+        let search = Rect {
+            x: chunk.x,
+            y: middle.checked_sub(1).unwrap_or(0),
+            // fixed size
+            height: SEARCH_BOX_HEIGHT,
+            width,
+        };
+
+        f.render_widget(Clear, search);
+        f.render_widget(search_box, search);
+    } else {
+        let clear = Rect {
+            x: chunk.x,
+            y: 1,
+            height: chunk.y.checked_sub(2).unwrap_or(0),
+            width,
+        };
+        let search = Rect {
+            x: chunk.x,
+            y: 1,
+            height: SEARCH_BOX_HEIGHT,
+            width,
+        };
+
+        let results = Rect {
+            x: chunk.x,
+            y: SEARCH_BOX_HEIGHT + 1,
+            height: chunk.height - SEARCH_BOX_HEIGHT - 5,
+            width,
+        };
+
+        let results_box = list
+            .list()
+            .block(
+                Block::default()
+                    .title([Span::styled(" Songs ", Style::default().fg(Color::White))].to_vec())
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Magenta))
+                    .border_type(BorderType::Rounded),
+            )
+            .highlight_style(Style::default().fg(Color::Magenta))
+            .highlight_symbol(">> ");
+        f.render_widget(Clear, clear);
+        f.render_widget(search_box, search);
+        f.render_stateful_widget(results_box, results, &mut *list.state());
+    }
 }
 
 pub fn chunks<'a>(
-    events: &mut StatefulList<Songs, Song>,
+    events: &mut StatefulList<Songs>,
     f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
 ) -> DrawLayout {
     let term = f.size();
 
     let chunks = term
         .height
-        .checked_sub(3)
+        .checked_sub(SEARCH_BOX_HEIGHT)
         .map(|height| {
             let songs = Rect {
                 x: term.x,
@@ -137,7 +181,7 @@ pub fn chunks<'a>(
                 y: height,
                 width: term.width,
                 // fixed height
-                height: 3,
+                height: SEARCH_BOX_HEIGHT,
             };
             (songs, gauge)
         })
@@ -151,7 +195,12 @@ pub fn chunks<'a>(
                  }) as u16)
                  // damn newlines taking up 2 bytes!
                      + 2;
-                songs.width.checked_sub(longest).map(|list_size| {
+                let width = match longest {
+                    0..=25 => 25,
+                    26..=35 => 35,
+                    _ => 40,
+                };
+                songs.width.checked_sub(width).map(|list_size| {
                     // space the list takes up
                     let list = Rect {
                         x: songs.x,
@@ -164,7 +213,7 @@ pub fn chunks<'a>(
                     let tags = Rect {
                         x: list_size,
                         y: songs.y,
-                        width: longest,
+                        width,
                         height: songs.height,
                     };
 
@@ -184,30 +233,21 @@ pub fn chunks<'a>(
     }
 }
 
-fn search_box(frame_size: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Percentage((100 - 10) / 2),
-                Constraint::Percentage(10),
-                Constraint::Percentage((100 - 10) / 2),
-            ]
-            .as_ref(),
-        )
-        .split(frame_size);
+fn search_box(f: Rect) -> Rect {
+    let width = match f.width {
+        _ if f.width >= 32 => 30,
+        _ if f.width >= 22 => 20,
+        _ if f.width >= 12 => 10,
+        _ => 5,
+    };
+    let middle = f.width / 2;
 
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Percentage((100 - 20) / 2),
-                Constraint::Percentage(20),
-                Constraint::Percentage((100 - 20) / 2),
-            ]
-            .as_ref(),
-        )
-        .split(popup_layout[1])[1]
+    Rect {
+        x: middle - (width / 2),
+        y: 0,
+        width,
+        height: f.height,
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
