@@ -125,7 +125,7 @@ pub fn search<'a>(
         let clear = Rect {
             x: chunk.x,
             y: 1,
-            height: chunk.y.checked_sub(2).unwrap_or(0),
+            height: chunk.height.checked_sub(2).unwrap_or(0),
             width,
         };
         let search = Rect {
@@ -234,12 +234,16 @@ pub fn chunks<'a>(
 }
 
 fn search_box(f: Rect) -> Rect {
-    let width = match f.width {
-        _ if f.width >= 32 => 30,
-        _ if f.width >= 22 => 20,
-        _ if f.width >= 12 => 10,
-        _ => 5,
+    // only resize if the size changes by at least 10
+    let cells = f.width % 10;
+    let width = if cells >= 2 {
+        f.width - cells
+    } else if cells < 2 {
+        f.width - (cells + 10)
+    } else {
+        5
     };
+
     let middle = f.width / 2;
 
     Rect {
