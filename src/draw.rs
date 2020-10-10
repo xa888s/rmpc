@@ -1,4 +1,4 @@
-use crate::{play::Songs, search::Search, state::StatefulList};
+use crate::{gauge::SimpleGauge, play::Songs, search::Search, state::StatefulList};
 use async_mpd::Status;
 use std::io;
 use tui::{
@@ -7,10 +7,13 @@ use tui::{
     style::{Color, Style},
     terminal::Frame,
     text::Span,
-    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 const SEARCH_BOX_HEIGHT: u16 = 3;
+
+// smallest size of heigh/width before crossterm/tui panics
+const MIN_SIZE: u16 = 2;
 
 // Playing layout
 //
@@ -60,15 +63,16 @@ pub fn gauge<'a>(
         };
 
         let percent = (elapsed / duration) * 100.;
-        let gauge = Gauge::default()
+        let gauge = SimpleGauge::default()
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
-            .gauge_style(Style::default().fg(Color::Magenta))
             .percent(percent as u16);
         f.render_widget(gauge, chunk);
+    } else {
+        log::error!("Cannot get song status");
     }
 }
 
@@ -87,6 +91,8 @@ pub fn tags<'a>(
             )
             .alignment(Alignment::Center);
         f.render_widget(tags, chunk);
+    } else {
+        log::error!("Cannot find tags for song");
     }
 }
 
@@ -108,7 +114,7 @@ pub fn search<'a>(
         )
         .alignment(Alignment::Left);
 
-    if input.results().is_empty() {
+    if list.is_empty() {
         let middle = chunk.height / 2;
 
         let search = Rect {
@@ -125,7 +131,7 @@ pub fn search<'a>(
         let clear = Rect {
             x: chunk.x,
             y: 1,
-            height: chunk.height.checked_sub(2).unwrap_or(0),
+            height: chunk.height.checked_sub(5).unwrap_or(0),
             width,
         };
         let search = Rect {
@@ -196,8 +202,10 @@ pub fn chunks<'a>(
                  // damn newlines taking up 2 bytes!
                      + 2;
                 let width = match longest {
+                    // min size
                     0..=25 => 25,
                     26..=35 => 35,
+                    // max size
                     _ => 40,
                 };
                 songs.width.checked_sub(width).map(|list_size| {
@@ -236,9 +244,9 @@ pub fn chunks<'a>(
 fn search_box(f: Rect) -> Rect {
     // only resize if the size changes by at least 10
     let cells = f.width % 10;
-    let width = if cells >= 2 {
+    let width = if cells >= MIN_SIZE {
         f.width - cells
-    } else if cells < 2 {
+    } else if cells < MIN_SIZE {
         f.width - (cells + 10)
     } else {
         5

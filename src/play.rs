@@ -16,8 +16,9 @@ impl Songs {
         self.status = status;
     }
 
-    pub fn set_songs(&mut self, songs: Vec<Track>) {
-        self.songs = songs;
+    pub fn set_songs(&mut self, songs: &[Track]) {
+        self.songs.clear();
+        self.songs.extend_from_slice(songs);
     }
 }
 

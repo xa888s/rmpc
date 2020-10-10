@@ -1,4 +1,5 @@
 mod draw;
+mod gauge;
 mod input;
 mod play;
 mod search;
@@ -22,7 +23,11 @@ use crossterm::{
 use directories_next as dirs;
 use simple_logging;
 
-use std::{io, net::SocketAddrV4, time::Duration};
+use std::{
+    io,
+    net::{Ipv4Addr, SocketAddrV4},
+    time::Duration,
+};
 
 use tui::{backend::CrosstermBackend, Terminal};
 
@@ -31,8 +36,11 @@ use structopt::StructOpt;
 #[derive(StructOpt)]
 #[structopt(name = "rmpc")]
 struct Opt {
-    #[structopt(short, long, default_value = "127.0.0.1:6600")]
-    addr: SocketAddrV4,
+    #[structopt(short, long, default_value = "127.0.0.1")]
+    ip: Ipv4Addr,
+
+    #[structopt(short, long, default_value = "6600")]
+    port: u16,
 }
 
 pub enum Mode {
@@ -98,9 +106,11 @@ impl App {
             data.push("rmpc.log");
             simple_logging::log_to_file(data, log::LevelFilter::Info)?;
         }
-        let addr = App::args().addr;
-        let mut client = MpdClient::new(addr).await?;
-        let mut event_listener = MpdClient::new(addr).await?;
+        log::info!("Starting up");
+        let opts = App::args();
+        let addr = SocketAddrV4::new(opts.ip, opts.port);
+        let mut client = MpdClient::new(addr).await.context("Failed to start MPD client. Is it started and on 127.0.0.1:6600 or the specified port/ip?")?;
+        let mut event_listener = MpdClient::new(addr).await.context("Failed to start MPD client. Is it started and on 127.0.0.1:6600 or the specified port/ip?")?;
 
         // start at the beginning of list
         self.song_list.next();
@@ -108,7 +118,7 @@ impl App {
         // initial state
         self.song_list.set_status(client.status().await.ok());
         self.song_list
-            .set_songs(client.queue().await.unwrap_or_default());
+            .set_songs(&client.queue().await.unwrap_or_default());
 
         self.draw().await?;
 
@@ -183,7 +193,7 @@ impl App {
                         Subsystem::Playlist | Subsystem::StoredPlaylist => {
                             let queue = client.queue().await;
                             self.song_list
-                                .set_songs(queue.context("Can't set songs from update")?);
+                                .set_songs(&queue.context("Can't set songs from update")?);
                         }
                         _ => {}
                     }
@@ -245,7 +255,7 @@ impl App {
                 let columns = ((search.x + 1) as usize + search_box.len()) as u16;
                 let rows = search.height / 2;
 
-                if !srch.results().is_empty() {
+                if !results.is_empty() {
                     match mode {
                         Mode::Selecting => {}
                         Mode::Searching | _ => f.set_cursor(columns, 2),
