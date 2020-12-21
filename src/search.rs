@@ -18,11 +18,13 @@ impl Search {
 
     pub async fn search(&mut self, client: &mut MpdClient) -> Result<()> {
         if !self.current.is_empty() {
+            // get all songs with provided title, can be expanded to more stuff I am sure
             let filter = Filter::new().and(FilterExpr::Contains(Tag::Title, self.current.clone()));
 
-            self.results.set_songs(client.search(&filter).await?);
+            // set songs to result of search
+            self.results.set_songs(&client.search(&filter).await?);
         } else {
-            self.results.set_songs(Vec::new());
+            self.results.set_songs(&[]);
         }
 
         Ok(())
@@ -38,6 +40,10 @@ impl Search {
 
     pub fn pop(&mut self) {
         self.current.pop();
+    }
+
+    pub fn clear(&mut self) {
+        self.current.clear();
     }
 
     pub fn get(&self, length: usize) -> &str {

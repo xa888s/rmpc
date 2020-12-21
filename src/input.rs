@@ -18,16 +18,18 @@ pub async fn use_key(
             KeyCode::Char(c) => {
                 srch.push(c);
                 srch.search(client).await?;
-                results.set_songs(srch.results().to_owned());
+                results.set_songs(srch.results());
             }
-            KeyCode::Enter => {
-                results.next();
-                *mode = Mode::Selecting;
+            KeyCode::Enter | KeyCode::Tab => {
+                if !results.is_empty() {
+                    results.next();
+                    *mode = Mode::Selecting;
+                }
             }
             KeyCode::Backspace => {
                 srch.pop();
                 srch.search(client).await?;
-                results.set_songs(srch.results().to_owned());
+                results.set_songs(srch.results());
             }
             KeyCode::Esc => *mode = Mode::Browsing,
             _ => {}
@@ -41,12 +43,16 @@ pub async fn use_key(
                 'G' => results.select_last(),
                 _ => {}
             },
+            KeyCode::Up | KeyCode::BackTab => results.previous(),
+            KeyCode::Down | KeyCode::Tab => results.next(),
             KeyCode::Enter => {
                 if let Some(s) = results.selected() {
                     client.queue_add(&s.file).await?;
                     let id = client.queue().await?.last().map(|s| s.id).flatten();
                     if let Some(id) = id {
                         client.playid(id).await?;
+                        srch.clear();
+                        results.clear()
                     }
                     *mode = Mode::Browsing;
                 }
@@ -62,6 +68,7 @@ pub async fn use_key(
                 'k' => list.previous(),
                 'g' => list.select(0),
                 'G' => list.select_last(),
+                'c' => client.queue_clear().await?,
                 '/' => *mode = Mode::Searching,
                 'p' => match client.status().await?.state.as_str() {
                     "pause" => client.play().await?,
@@ -69,6 +76,8 @@ pub async fn use_key(
                 },
                 _ => {}
             },
+            KeyCode::Up | KeyCode::BackTab => list.previous(),
+            KeyCode::Down | KeyCode::Tab => list.next(),
             KeyCode::Enter => {
                 if let Some(s) = list.selected() {
                     if let Some(id) = s.id {
