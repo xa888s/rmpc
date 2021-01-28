@@ -2,20 +2,13 @@ use crate::play::Songs;
 use anyhow::Result;
 use async_mpd::{Filter, FilterExpr, MpdClient, Tag, Track};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Search {
     current: String,
     results: Songs,
 }
 
 impl Search {
-    pub fn new() -> Search {
-        Search {
-            current: String::new(),
-            results: Songs::default(),
-        }
-    }
-
     pub async fn search(&mut self, client: &mut MpdClient) -> Result<()> {
         if !self.current.is_empty() {
             // get all songs with provided title, can be expanded to more stuff I am sure
@@ -56,11 +49,5 @@ impl Search {
             0
         };
         &self.current[start..]
-    }
-}
-
-impl Default for Search {
-    fn default() -> Self {
-        Search::new()
     }
 }

@@ -8,7 +8,7 @@ use tui::{
     widgets::{List, ListItem, ListState},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StatefulList<T> {
     items: T,
     state: RefCell<ListState>,
@@ -111,18 +111,6 @@ where
         });
 
         self.state.borrow_mut().select(index);
-    }
-}
-
-impl<T> Default for StatefulList<T>
-where
-    T: Default,
-{
-    fn default() -> Self {
-        Self {
-            items: T::default(),
-            state: RefCell::new(ListState::default()),
-        }
     }
 }
 
