@@ -39,7 +39,7 @@ where
         List::new(
             self.items
                 .iter()
-                .map(|s| ListItem::new(Span::raw(s.title.as_deref().unwrap_or_else(|| "Untitled"))))
+                .map(|s| ListItem::new(Span::raw(s.title.as_deref().unwrap_or("Untitled"))))
                 .collect::<Vec<ListItem<'_>>>(),
         )
     }
@@ -59,7 +59,7 @@ where
                         t.as_ref().map(|t| {
                             let mut buf = String::with_capacity(n.len() + t.len());
                             buf.push_str(n);
-                            buf.push_str(" ");
+                            buf.push(' ');
                             buf.push_str(t);
                             buf.push('\n');
                             buf

@@ -72,7 +72,7 @@ pub async fn use_key(
                 '/' => *mode = Mode::Searching,
                 'p' => match client.status().await?.state.as_str() {
                     "pause" => client.play().await?,
-                    "play" | _ => client.pause().await?,
+                    _ => client.pause().await?,
                 },
                 _ => {}
             },
@@ -85,7 +85,7 @@ pub async fn use_key(
                     }
                 }
             }
-            KeyCode::Esc | _ => {}
+            _ => {}
         }
     }
     Ok(Status::Continue)

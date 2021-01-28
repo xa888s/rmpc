@@ -1,5 +1,4 @@
 mod draw;
-mod gauge;
 mod input;
 mod play;
 mod search;
@@ -12,7 +11,7 @@ use state::StatefulList;
 use search::Search;
 
 use async_mpd::{Error, MpdClient, Subsystem};
-use async_std::{prelude::*, stream, sync, task};
+use async_std::{channel, prelude::*, stream, task};
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream},
@@ -21,7 +20,6 @@ use crossterm::{
 };
 
 use directories_next as dirs;
-use simple_logging;
 
 use std::{
     io,
@@ -123,13 +121,13 @@ impl App {
         self.draw().await?;
 
         // Listening to MPD events
-        let (s, mut r) = sync::channel(1);
+        let (s, mut r) = channel::bounded(1);
         let s2 = s.clone();
         let s3 = s.clone();
 
         task::spawn(async move {
             while let Some(u) = event_listener.idle().await.ok().flatten() {
-                s.send(EventMessage::Mpd(u)).await;
+                s.send(EventMessage::Mpd(u)).await.unwrap();
             }
         });
 
@@ -138,7 +136,7 @@ impl App {
 
         task::spawn(async move {
             while let Some(u) = input.next().await.transpose().ok().flatten() {
-                s2.send(EventMessage::Term(u)).await;
+                s2.send(EventMessage::Term(u)).await.unwrap();
             }
         });
 
@@ -146,8 +144,8 @@ impl App {
         let mut interval = stream::interval(Duration::from_millis(500));
 
         task::spawn(async move {
-            while let Some(_) = interval.next().await {
-                s3.send(EventMessage::Tick).await;
+            while interval.next().await.is_some() {
+                s3.send(EventMessage::Tick).await.unwrap();
             }
         });
 
@@ -258,7 +256,8 @@ impl App {
                 if !results.is_empty() {
                     match mode {
                         Mode::Selecting => {}
-                        Mode::Searching | _ => f.set_cursor(columns, 2),
+                        Mode::Searching => f.set_cursor(columns, 2),
+                        _ => f.set_cursor(columns, 2),
                     }
                 } else {
                     f.set_cursor(columns, rows);

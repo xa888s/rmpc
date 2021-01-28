@@ -1,4 +1,4 @@
-use crate::{gauge::SimpleGauge, play::Songs, search::Search, state::StatefulList};
+use crate::{play::Songs, search::Search, state::StatefulList};
 use async_mpd::Status;
 use std::io;
 use tui::{
@@ -7,7 +7,7 @@ use tui::{
     style::{Color, Style},
     terminal::Frame,
     text::Span,
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph},
 };
 
 const SEARCH_BOX_HEIGHT: u16 = 3;
@@ -62,25 +62,21 @@ pub fn gauge<'a>(
             _ => (0., 1.),
         };
 
-        let percent = (elapsed / duration) * 100.;
-        let gauge = SimpleGauge::default()
+        let ratio = elapsed / duration;
+        let gauge = LineGauge::default()
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             )
-            .percent(percent as u16);
+            .ratio(ratio);
         f.render_widget(gauge, chunk);
     } else {
         log::error!("Cannot get song status");
     }
 }
 
-pub fn tags<'a>(
-    tags: Option<String>,
-    f: &mut Frame<'a, CrosstermBackend<io::Stdout>>,
-    chunk: Rect,
-) {
+pub fn tags(tags: Option<String>, f: &mut Frame<'_, CrosstermBackend<io::Stdout>>, chunk: Rect) {
     if let Some(tags) = tags {
         let tags = Paragraph::new(&*tags)
             .block(
@@ -119,7 +115,7 @@ pub fn search<'a>(
 
         let search = Rect {
             x: chunk.x,
-            y: middle.checked_sub(1).unwrap_or(0),
+            y: middle.saturating_sub(1),
             // fixed size
             height: SEARCH_BOX_HEIGHT,
             width,
@@ -131,7 +127,7 @@ pub fn search<'a>(
         let clear = Rect {
             x: chunk.x,
             y: 1,
-            height: chunk.height.checked_sub(5).unwrap_or(0),
+            height: chunk.height.saturating_sub(5),
             width,
         };
         let search = Rect {
@@ -193,7 +189,7 @@ pub fn chunks<'a>(
         })
         .and_then(|(songs, gauge)| {
             events.tags().and_then(|tags| {
-                let longest = (tags.split("\n").fold(0, |mut l, s| {
+                let longest = (tags.split('\n').fold(0, |mut l, s| {
                     if l < s.len() {
                         l = s.len();
                     }
