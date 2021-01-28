@@ -1,4 +1,7 @@
-use crate::{play::Songs, search::Search, state::StatefulList};
+use crate::{
+    mpd::{play::Songs, search::Search},
+    state::StatefulList,
+};
 use async_mpd::Status;
 use std::io;
 use tui::{

@@ -2,7 +2,11 @@ use crossterm::event::KeyCode;
 
 use anyhow::Result;
 
-use crate::{play::Songs, search::Search, state::StatefulList, Mode};
+use crate::{
+    mpd::{play::Songs, search::Search},
+    state::StatefulList,
+    Mode,
+};
 use async_mpd::MpdClient;
 
 pub async fn use_key(

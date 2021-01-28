@@ -1,4 +1,4 @@
-use crate::play::Songs;
+use super::play::Songs;
 use anyhow::Result;
 use async_mpd::{Filter, FilterExpr, MpdClient, Tag, Track};
 

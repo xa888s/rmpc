@@ -1,13 +1,12 @@
-mod play;
-mod search;
+mod mpd;
 mod state;
 mod terminal;
 
 use anyhow::{Context, Result};
-use play::Songs;
+use mpd::play::Songs;
 use state::StatefulList;
 
-use search::Search;
+use mpd::search::Search;
 
 use async_mpd::{Error, MpdClient, Subsystem};
 use async_std::{channel, prelude::*, stream, task};
